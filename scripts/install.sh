@@ -138,6 +138,19 @@ if [ "$NEED_REBOOT" -eq 1 ]; then
   echo "Run: sudo reboot"
 fi
 
+# ----- Install systemd units to correct location -----
+echo "-- Installing systemd unit files..."
+sudo cp "$APP_DIR/systemd/"*.service "$APP_DIR/systemd/"*.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+
+# Update User/Group in the installed unit files
+sudo sed -i "s/^User=.*/User=$INSTALL_USER/" /etc/systemd/system/inkycal.service /etc/systemd/system/inkycal-deepclean.service
+sudo sed -i "s/^Group=.*/Group=$INSTALL_GROUP/" /etc/systemd/system/inkycal.service /etc/systemd/system/inkycal-deepclean.service
+
+# ----- Enable timers -----
+echo "-- Enabling timers..."
+sudo systemctl enable --now inkycal.timer
+sudo systemctl enable --now inkycal-deepclean.timer
 
 # Quick inky detection (non-fatal)
 echo "-- Checking Inky detection (non-fatal)..."
@@ -166,3 +179,20 @@ if [ -f "$APP_DIR/.env" ]; then
 else
   echo "⚠ .env missing. Create it:"
   echo "  cp $APP_DIR/.env.example $APP_DIR/.env
+
+echo
+echo "== Done =="
+echo "Edit these before expecting calendar sync:"
+echo "  sudo nano $APP_DIR/config.yaml"
+echo "  sudo nano $APP_DIR/.env"
+echo
+echo "Check timers:"
+echo "  systemctl list-timers --all | grep inkycal"
+echo "Logs:"
+echo "  journalctl -u inkycal.service -n 50"
+echo
+echo "Manual test (forces refresh):"
+echo "  $VENV_DIR/bin/python -m inkycal.main --config $APP_DIR/config.yaml --state $STATE_DIR/state.json --force"
+echo
+echo "NOTE: If SPI/I2C devices weren't present, reboot:"
+echo "  sudo reboot"
