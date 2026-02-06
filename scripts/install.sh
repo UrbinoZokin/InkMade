@@ -36,20 +36,56 @@ python3 -m venv "$VENV_DIR"
 echo "-- Installing Python deps..."
 "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
 
+echo "-- Installing inkycal package into venv..."
+cd /opt/inkycal
+/opt/inkycal/venv/bin/pip install -e .
+
 # Optional: install inky driver into venv if not already present.
 # Many users install it via pip; some use apt. We'll prefer pip in the venv.
 echo "-- Ensuring Inky library is installed in venv..."
-"$VENV_DIR/bin/python" - <<'PY'
-import importlib.util, sys
-spec = importlib.util.find_spec("inky")
-if spec is None:
-    sys.exit(2)
-sys.exit(0)
-PY
-if [ $? -ne 0 ]; then
-  echo "   Inky not found in venv; installing..."
-  "$VENV_DIR/bin/pip" install inky[rpi]
+"$VENV_DIR/bin/pip" install inky[rpi]
+
+# -------------- Create config.yaml file --------------
+
+echo "-- Creating config.yaml if missing..."
+
+CONFIG_EXAMPLE="/opt/inkycal/config.yaml.example"
+CONFIG_FILE="/opt/inkycal/config.yaml"
+
+if [ ! -f "$CONFIG_FILE" ]; then
+  if [ -f "$CONFIG_EXAMPLE" ]; then
+    cp "$CONFIG_EXAMPLE" "$CONFIG_FILE"
+    echo "✓ Created $CONFIG_FILE from example"
+  else
+    echo "⚠ Could not find $CONFIG_EXAMPLE to create config.yaml"
+  fi
+else
+  echo "✓ $CONFIG_FILE already exists (leaving it unchanged)"
 fi
+
+# ---------------- Create env File --------------
+echo "-- Creating .env if missing..."
+
+ENV_EXAMPLE="/opt/inkycal/.env.example"
+ENV_FILE="/opt/inkycal/.env"
+
+if [ ! -f "$ENV_FILE" ]; then
+  if [ -f "$ENV_EXAMPLE" ]; then
+    cp "$ENV_EXAMPLE" "$ENV_FILE"
+    echo "✓ Created $ENV_FILE from example (edit this!)"
+  else
+    echo "⚠ Could not find $ENV_EXAMPLE to create .env"
+  fi
+else
+  echo "✓ $ENV_FILE already exists"
+fi
+
+
+# ----- Install systemd units to correct location -----
+echo "-- Installing systemd unit files..."
+sudo cp "$APP_DIR/systemd/"*.service "$APP_DIR/systemd/"*.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+
 
 # Sanity checks
 echo
@@ -138,10 +174,6 @@ if [ "$NEED_REBOOT" -eq 1 ]; then
   echo "Run: sudo reboot"
 fi
 
-# ----- Install systemd units to correct location -----
-echo "-- Installing systemd unit files..."
-sudo cp "$APP_DIR/systemd/"*.service "$APP_DIR/systemd/"*.timer /etc/systemd/system/
-sudo systemctl daemon-reload
 
 # Update User/Group in the installed unit files
 sudo sed -i "s/^User=.*/User=$INSTALL_USER/" /etc/systemd/system/inkycal.service /etc/systemd/system/inkycal-deepclean.service
