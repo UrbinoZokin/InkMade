@@ -62,13 +62,82 @@ else
   echo "✗ DejaVuSans.ttf missing (fonts-dejavu-core should provide it)"
 fi
 
-# SPI enabled check: /dev/spidev*
+echo
+echo "== Enabling SPI and I2C =="
+
+# 1) Try raspi-config non-interactive (preferred)
+if command -v raspi-config >/dev/null 2>&1; then
+  # Enable SPI (do_spi: 0 enable, 1 disable)
+  sudo raspi-config nonint do_spi 0 || true
+  # Enable I2C (do_i2c: 0 enable, 1 disable)
+  sudo raspi-config nonint do_i2c 0 || true
+else
+  echo "⚠ raspi-config not found; will try config.txt edits."
+fi
+
+# 2) Ensure dtparam lines exist (fallback/extra safety)
+BOOT_CFG=""
+if [ -f /boot/firmware/config.txt ]; then
+  BOOT_CFG="/boot/firmware/config.txt"
+elif [ -f /boot/config.txt ]; then
+  BOOT_CFG="/boot/config.txt"
+fi
+
+if [ -n "$BOOT_CFG" ]; then
+  echo "-- Using boot config: $BOOT_CFG"
+
+  # Ensure dtparam=spi=on
+  if ! grep -qE '^\s*dtparam=spi=on\s*$' "$BOOT_CFG"; then
+    # If a dtparam=spi= line exists but is off, replace it; else append.
+    if grep -qE '^\s*dtparam=spi=' "$BOOT_CFG"; then
+      sudo sed -i 's/^\s*dtparam=spi=.*/dtparam=spi=on/' "$BOOT_CFG"
+    else
+      echo "dtparam=spi=on" | sudo tee -a "$BOOT_CFG" >/dev/null
+    fi
+  fi
+
+  # Ensure dtparam=i2c_arm=on
+  if ! grep -qE '^\s*dtparam=i2c_arm=on\s*$' "$BOOT_CFG"; then
+    if grep -qE '^\s*dtparam=i2c_arm=' "$BOOT_CFG"; then
+      sudo sed -i 's/^\s*dtparam=i2c_arm=.*/dtparam=i2c_arm=on/' "$BOOT_CFG"
+    else
+      echo "dtparam=i2c_arm=on" | sudo tee -a "$BOOT_CFG" >/dev/null
+    fi
+  fi
+else
+  echo "⚠ Could not find /boot/firmware/config.txt or /boot/config.txt"
+fi
+
+# 3) Load kernel modules now (no harm if already loaded)
+sudo modprobe spi-bcm2835 2>/dev/null || true
+sudo modprobe i2c-dev 2>/dev/null || true
+
+# 4) Post-check
+echo "-- Checking device nodes (may require reboot to appear)..."
 if ls /dev/spidev* >/dev/null 2>&1; then
   echo "✓ SPI device present: $(ls /dev/spidev* | tr '\n' ' ')"
 else
-  echo "⚠ SPI device not found. Inky requires SPI."
-  echo "  Enable with: sudo raspi-config  -> Interface Options -> SPI -> Enable"
+  echo "⚠ SPI device not present yet (reboot likely required)."
 fi
+
+if ls /dev/i2c-* >/dev/null 2>&1; then
+  echo "✓ I2C device present: $(ls /dev/i2c-* | tr '\n' ' ')"
+else
+  echo "⚠ I2C device not present yet (reboot likely required)."
+fi
+
+# 5) Recommend reboot if needed
+NEED_REBOOT=0
+ls /dev/spidev* >/dev/null 2>&1 || NEED_REBOOT=1
+ls /dev/i2c-*   >/dev/null 2>&1 || NEED_REBOOT=1
+
+if [ "$NEED_REBOOT" -eq 1 ]; then
+  echo
+  echo "== Reboot recommended =="
+  echo "SPI/I2C were enabled, but device nodes are not visible yet."
+  echo "Run: sudo reboot"
+fi
+
 
 # Quick inky detection (non-fatal)
 echo "-- Checking Inky detection (non-fatal)..."
