@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/YOUR_USERNAME/inkycal.git}"
+REPO_URL="${REPO_URL:-https://github.com/UrbinoZokin/InkMade.git}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/inkycal}"
 
 echo "== InkyCal bootstrap =="
