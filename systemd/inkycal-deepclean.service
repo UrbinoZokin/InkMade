@@ -1,0 +1,11 @@
+[Unit]
+Description=InkyCal - Weekly deep clean refresh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/inkycal/.env
+ExecStart=/opt/inkycal/scripts/deep_clean.sh
+User=pi
+Group=pi
