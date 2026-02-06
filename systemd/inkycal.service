@@ -1,0 +1,11 @@
+[Unit]
+Description=InkyCal - Render calendar schedule to Inky display
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/inkycal/.env
+ExecStart=/opt/inkycal/scripts/update.sh
+User=pi
+Group=pi
