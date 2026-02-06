@@ -177,7 +177,7 @@ fi
 
 # Update User/Group in the installed unit files
 sudo sed -i "s/^User=.*/User=$USER/" /etc/systemd/system/inkycal.service /etc/systemd/system/inkycal-deepclean.service
-sudo sed -i "s/^Group=.*/Group=$GROUP/" /etc/systemd/system/inkycal.service /etc/systemd/system/inkycal-deepclean.service
+sudo sed -i "s/^Group=.*/Group=$GROUP/" /etc/systemd/system/inkycal.service /etc/systemd/system/inkycal-deepclean.service || False
 
 # ----- Enable timers -----
 echo "-- Enabling timers..."
