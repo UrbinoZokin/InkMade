@@ -21,7 +21,7 @@ sudo chown -R "$USER":"$USER" "$INSTALL_DIR"
 if [ -d "$INSTALL_DIR/.git" ]; then
   echo "Updating existing repo..."
   cd "$INSTALL_DIR"
-  git fetch "$REPO_URL" --all
+  git fetch --all
   git reset --hard main
   
 else
