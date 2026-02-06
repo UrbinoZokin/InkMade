@@ -1,0 +1,32 @@
+timezone: "America/Arizona"
+
+poll_interval_minutes: 15
+
+sleep:
+  enabled: true
+  start: "22:30"   # 10:30 PM
+  end: "06:30"     # 6:30 AM
+  banner_text: "Sleeping — updates resume in the morning"
+
+deep_clean:
+  enabled: true
+  weekday: "Sunday"
+  time: "03:30"
+
+display:
+  # Inky Impressions 13.3 is usually 1600x1200 landscape.
+  # We'll render portrait by swapping and rotating.
+  width: 1200
+  height: 1600
+  rotate_degrees: 90   # 0/90/180/270 depending on how you mount it
+  saturation: 0.0      # optional; depends on Inky driver support
+  border: "white"
+
+calendars:
+  google:
+    enabled: true
+    calendar_ids:
+      - "primary"
+  icloud:
+    enabled: true
+    calendar_name_allowlist: []  # empty means all discovered calendars
