@@ -22,7 +22,7 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   echo "Updating existing repo..."
   cd "$INSTALL_DIR"
   git remote set-url origin "$REPO_URL" || true
-  git pull --ff-only
+  git pull --ff-only || git reset --hard origin/branch_to_overwrite
 else
   echo "Cloning repo..."
   git clone "$REPO_URL" "$INSTALL_DIR"
