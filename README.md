@@ -1,24 +1,23 @@
-# InkyCal (Pi Zero 2 W + Inky Impressions 13.3)
+# InkyCal  
+Daily calendar display for Raspberry Pi Zero 2 W + Inky Impressions 13.3" E-Ink
 
-Displays today's merged Google + iCloud calendar schedule in portrait mode.
-- Polls every 15 minutes
-- Updates only if schedule changed
-- Shows a "Sleeping..." banner once at sleep start
-- Weekly deep clean refresh
+Displays today’s merged Google + iCloud calendar schedule in portrait mode.
 
-## Setup
+### Features
 
-1) Copy repo to /opt/inkycal
-sudo mkdir -p /opt/inkycal
-sudo chown -R $USER:$USER /opt/inkycal
-# copy files here (git clone or scp)
+- Google Calendar + Apple iCloud (CalDAV) sync  
+- Sorted by start time (all-day events first)  
+- Portrait layout for 13.3" display  
+- Updates every 15 minutes  
+- Only refreshes screen when content changes (e-ink friendly)  
+- Nightly sleep window with one-time “Sleeping…” banner  
+- Weekly deep clean refresh to reduce ghosting  
+- Fully automated install with virtualenv (no externally-managed errors)  
+- systemd timers for reliability  
 
-2) Install
-cd /opt/inkycal
-./scripts/install.sh
+---
 
-3) Configure
-cp config.yaml.example /opt/inkycal/config.yaml
-cp .env.example /opt/inkycal/.env
-nano /opt/inkycal/config.yaml
-nano /opt/inkycal/.env
+# 🚀 Quick Install (one command)
+
+curl -fsSL https://raw.githubusercontent.com/UrbinoZokin/InkMade/main/scripts/bootstrap.sh | \
+REPO_URL="https://github.com/UrbinoZokin/InkMade.git" bash
