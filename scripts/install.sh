@@ -176,8 +176,8 @@ fi
 
 
 # Update User/Group in the installed unit files
-sudo sed -i "s/^User=.*/User=$INSTALL_USER/" /etc/systemd/system/inkycal.service /etc/systemd/system/inkycal-deepclean.service
-sudo sed -i "s/^Group=.*/Group=$INSTALL_GROUP/" /etc/systemd/system/inkycal.service /etc/systemd/system/inkycal-deepclean.service
+sudo sed -i "s/^User=.*/User=$USER/" /etc/systemd/system/inkycal.service /etc/systemd/system/inkycal-deepclean.service
+sudo sed -i "s/^Group=.*/Group=$GROUP/" /etc/systemd/system/inkycal.service /etc/systemd/system/inkycal-deepclean.service
 
 # ----- Enable timers -----
 echo "-- Enabling timers..."
@@ -230,7 +230,7 @@ EOF
 
   echo "-- Ensuring persistent directories exist..."
   sudo mkdir -p /var/lib/inkycal /opt/inkycal
-  sudo chown -R "$INSTALL_USER":"$INSTALL_GROUP" /var/lib/inkycal /opt/inkycal
+  sudo chown -R "$USER":"$GROUP" /var/lib/inkycal /opt/inkycal
 
   echo "-- Updating /etc/fstab for tmpfs + bind mounts..."
   FSTAB="/etc/fstab"
