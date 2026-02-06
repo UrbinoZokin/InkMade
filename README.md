@@ -1,3 +1,4 @@
+## WORK IN PROGRESS
 # InkyCal  
 Daily calendar display for Raspberry Pi Zero 2 W + Inky Impressions 13.3" E-Ink
 
