@@ -154,7 +154,6 @@ sudo systemctl enable --now inkycal-deepclean.timer
 
 # Quick inky detection (non-fatal)
 echo "-- Checking Inky detection (non-fatal)..."
-"$VENV_DIR/bin/python" - <<'PY' || true
 try:
     from inky.auto import auto
     disp = auto(ask_user=False, verbose=False)
@@ -178,7 +177,61 @@ if [ -f "$APP_DIR/.env" ]; then
   echo "✓ .env present"
 else
   echo "⚠ .env missing. Create it:"
-  echo "  cp $APP_DIR/.env.example $APP_DIR/.env
+  echo "  cp $APP_DIR/.env.example $APP_DIR/.env"
+fi
+
+# ===== Power-loss safe filesystem (optional) =====
+ENABLE_OVERLAYROOT="${ENABLE_OVERLAYROOT:-0}"
+
+if [ "$ENABLE_OVERLAYROOT" -eq 1 ]; then
+  echo
+  echo "== Enabling power-loss safe filesystem (overlayroot + tmpfs logs) =="
+
+  echo "-- Installing overlayroot..."
+  sudo apt-get install -y overlayroot
+
+  echo "-- Configuring overlayroot..."
+  # This makes root read-only with a tmpfs overlay (writes go to RAM)
+  sudo tee /etc/overlayroot.conf >/dev/null <<'EOF'
+overlayroot="tmpfs:swap=1"
+EOF
+
+  echo "-- Ensuring persistent directories exist..."
+  sudo mkdir -p /var/lib/inkycal /opt/inkycal
+  sudo chown -R "$INSTALL_USER":"$INSTALL_GROUP" /var/lib/inkycal /opt/inkycal
+
+  echo "-- Updating /etc/fstab for tmpfs + bind mounts..."
+  FSTAB="/etc/fstab"
+
+  # Helper: append a line only if it doesn't already exist (exact match)
+  ensure_fstab_line() {
+    local line="$1"
+    grep -qxF "$line" "$FSTAB" || echo "$line" | sudo tee -a "$FSTAB" >/dev/null
+  }
+
+  # Bind mounts (these paths remain persistent across reboots)
+  # NOTE: bind mounts require both source and target to exist (they do).
+  ensure_fstab_line "# InkyCal persistent storage"
+  ensure_fstab_line "/var/lib/inkycal  /var/lib/inkycal  none  bind  0  0"
+  ensure_fstab_line "/opt/inkycal      /opt/inkycal      none  bind  0  0"
+
+  # RAM-backed temp + logs to reduce SD writes/corruption
+  ensure_fstab_line ""
+  ensure_fstab_line "# RAM-backed temp/logs (reduce SD wear)"
+  ensure_fstab_line "tmpfs   /tmp        tmpfs   defaults,noatime,size=100m   0  0"
+  ensure_fstab_line "tmpfs   /var/tmp    tmpfs   defaults,noatime,size=50m    0  0"
+  ensure_fstab_line "tmpfs   /var/log    tmpfs   defaults,noatime,size=50m    0  0"
+
+  echo "-- Enabling kernel modules now (best-effort)..."
+  sudo modprobe overlay 2>/dev/null || true
+
+  echo
+  echo "== Overlayroot enabled. A reboot is required. =="
+  echo "After reboot, root will be overlayed (writes go to RAM)."
+  echo "Your app data stays persistent in /var/lib/inkycal and /opt/inkycal."
+  echo
+  echo "Reboot with: sudo reboot"
+fi
 
 echo
 echo "== Done =="
