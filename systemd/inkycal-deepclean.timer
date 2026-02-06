@@ -1,0 +1,10 @@
+[Unit]
+Description=InkyCal - Weekly deep clean timer
+
+[Timer]
+# Weekly at 03:30 Sunday (matches example config; adjust as desired)
+OnCalendar=Sun *-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
