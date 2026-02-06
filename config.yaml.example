@@ -1,11 +1,11 @@
-timezone: "America/Arizona"
+timezone: "America/Phoenix"
 
 poll_interval_minutes: 15
 
 sleep:
   enabled: true
-  start: "22:30"   # 10:30 PM
-  end: "06:30"     # 6:30 AM
+  start: "21:45"   # 9:45 PM
+  end: "05:00"     # 5:00 AM
   banner_text: "Sleeping — updates resume in the morning"
 
 deep_clean:
