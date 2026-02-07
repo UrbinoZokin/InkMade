@@ -119,13 +119,17 @@ def render_daily_schedule(
         for i, line in enumerate(lines):
             d.text((x_title, y + i * title_line_h), line, fill="black", font=font_title)
 
-        y += max(min_row_h, title_line_h * len(lines) + 12)
+        row_start_y = y
+        content_y = row_start_y + title_line_h * len(lines) + 6
 
         if e.location:
             loc = e.location.strip()
             if loc:
-                d.text((x_title, y - 12), loc, fill="black", font=font_small)
-                y += font_small.size + 10
+                d.text((x_title, content_y), loc, fill="black", font=font_small)
+                content_y += font_small.size + 8
+
+        row_h = max(min_row_h, content_y - row_start_y + 8)
+        y = row_start_y + row_h
 
         # subtle separator
         d.line((padding, y, canvas_w - padding, y), fill="black", width=1)
@@ -183,13 +187,17 @@ def render_daily_schedule(
                 for i, line in enumerate(lines):
                     d.text((x_title, y + i * 32), line, fill="black", font=font_title_small)
 
-                y += max(55, 32 * len(lines) + 8)
+                row_start_y = y
+                content_y = row_start_y + 32 * len(lines) + 4
 
                 if e.location:
                     loc = e.location.strip()
                     if loc:
-                        d.text((x_title, y - 8), loc, fill="black", font=font_small)
-                        y += 22
+                        d.text((x_title, content_y), loc, fill="black", font=font_small)
+                        content_y += font_small.size + 6
+
+                row_h = max(55, content_y - row_start_y + 6)
+                y = row_start_y + row_h
 
                 d.line((padding, y, canvas_w - padding, y), fill="black", width=1)
                 y += 14
