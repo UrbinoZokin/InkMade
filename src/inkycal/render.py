@@ -35,13 +35,13 @@ def render_daily_schedule(
     img = Image.new("RGB", (canvas_w, canvas_h), "white")
     d = ImageDraw.Draw(img)
 
-    font_header = _load_font(60)
-    font_tomorrow_header = _load_font(32)
-    font_time = _load_font(36)
-    font_title = _load_font(40)
+    font_header = _load_font(72)
+    font_tomorrow_header = _load_font(38)
+    font_time = _load_font(46)
+    font_title = _load_font(52)
     font_small = _load_font(30)
-    font_time_small = _load_font(24)
-    font_title_small = _load_font(28)
+    font_time_small = _load_font(30)
+    font_title_small = _load_font(34)
 
     padding = 40
     y = padding
