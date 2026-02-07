@@ -92,11 +92,11 @@ def run_once(config_path: str = CONFIG_PATH_DEFAULT, state_path: str = STATE_PAT
         if creds_path and token_path:
             events.extend(fetch_google_events(cfg.google.calendar_ids, day_start, day_end, tz, creds_path, token_path))
 
-    if cfg.icloud.enabled:
-        user = os.environ.get("ICLOUD_USERNAME", "")
-        pw = os.environ.get("ICLOUD_APP_PASSWORD", "")
-        if user and pw:
-            events.extend(fetch_icloud_events(day_start, day_end, tz, user, pw, cfg.icloud.calendar_name_allowlist))
+    # if cfg.icloud.enabled:
+    #     user = os.environ.get("ICLOUD_USERNAME", "")
+    #     pw = os.environ.get("ICLOUD_APP_PASSWORD", "")
+    #     if user and pw:
+    #         events.extend(fetch_icloud_events(day_start, day_end, tz, user, pw, cfg.icloud.calendar_name_allowlist))
 
     # Render signature includes whether we show the sleep banner
     header_date = now.strftime("%A, %B %-d, %Y")
