@@ -59,8 +59,13 @@ def render_daily_schedule(
 
     events_sorted = sorted(events, key=_event_sort_key)
 
-    time_col_w = 240
-    gap = 30
+    time_strings = [
+        "All day" if e.all_day else f"{_fmt_time(e.start)}–{_fmt_time(e.end)}"
+        for e in events_sorted
+    ]
+    max_time_w = max((d.textlength(s, font=font_time) for s in time_strings), default=0)
+    gap = int(font_time.size * 0.6)
+    time_col_w = max_time_w
     title_line_h = font_title.size + 8
     min_row_h = 80
     max_y = canvas_h - padding - (70 if show_sleep_banner else 0)
@@ -77,7 +82,9 @@ def render_daily_schedule(
 
         # Time column
         d.text((padding, y), time_str, fill="black", font=font_time)
-
+        time_w = d.textlength(time_str, font=font_time)
+        x_time = padding + max(0, time_col_w - time_w)
+        d.text((x_time, y), time_str, fill="black", font=font_time)
         # Title (wrap)
         x_title = padding + time_col_w + gap
         title = e.title
