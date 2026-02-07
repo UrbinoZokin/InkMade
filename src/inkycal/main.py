@@ -80,6 +80,7 @@ def run_once(config_path: str = CONFIG_PATH_DEFAULT, state_path: str = STATE_PAT
 
     # During sleep: do nothing unless we need to apply the banner refresh
     if in_sleep and not should_apply_sleep_banner and not force and not deep_clean:
+        print("In sleep window; skipping poll/refresh")
         return
 
     # Fetch events (only needed if we're not just placing a banner)
@@ -97,13 +98,16 @@ def run_once(config_path: str = CONFIG_PATH_DEFAULT, state_path: str = STATE_PAT
     #     pw = os.environ.get("ICLOUD_APP_PASSWORD", "")
     #     if user and pw:
     #         events.extend(fetch_icloud_events(day_start, day_end, tz, user, pw, cfg.icloud.calendar_name_allowlist))
-
+    
+    
+    
     # Render signature includes whether we show the sleep banner
     header_date = now.strftime("%A, %B %-d, %Y")
     show_banner = in_sleep and cfg.sleep.enabled
     sig = _events_signature(tz, events, header_date, show_banner)
-
+    print(f"Fetched {len(events)} events total; in_sleep={in_sleep}, show_banner={show_banner}, force={force}, deep_clean={deep_clean}")
     if (not force) and (not deep_clean) and (not should_apply_sleep_banner) and (sig == state.last_hash):
+        print("No schedule change; skipping display refresh")
         return
 
     img = render_daily_schedule(
