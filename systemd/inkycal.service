@@ -8,4 +8,5 @@ Type=oneshot
 EnvironmentFile=/opt/inkycal/.env
 ExecStart=/opt/inkycal/scripts/update.sh
 User=pi
-Group=pi
+StandardOutput=journal
+StandardError=journal
