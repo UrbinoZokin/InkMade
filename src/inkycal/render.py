@@ -50,9 +50,6 @@ def render_daily_schedule(
     d.text((padding, y), header, fill="black", font=font_header)
     y += 80
 
-    d.text((padding, y), f"Updated: {now.astimezone(tz).strftime('%-I:%M %p').lower()}", fill="black", font=font_small)
-    y += 45
-
     # Divider
     d.line((padding, y, canvas_w - padding, y), fill="black", width=2)
     y += 25
@@ -68,7 +65,11 @@ def render_daily_schedule(
     time_col_w = max_time_w
     title_line_h = font_title.size + 8
     min_row_h = 80
-    max_y = canvas_h - padding - (70 if show_sleep_banner else 0)
+    banner_h = 70
+    updated_gap = 10
+    updated_text_h = font_small.size + 6
+    updated_block_h = updated_text_h + updated_gap
+    max_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - updated_block_h
 
     for e in events_sorted:
         if y > max_y:
@@ -175,8 +176,11 @@ def render_daily_schedule(
 
                 d.line((padding, y, canvas_w - padding, y), fill="black", width=1)
                 y += 14
+    updated_text = f"Updated: {now.astimezone(tz).strftime('%-I:%M %p').lower()}"
+    updated_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - updated_text_h
+    d.text((padding, updated_y), updated_text, fill="black", font=font_small)
+    
     if show_sleep_banner:
-        banner_h = 70
         y0 = canvas_h - padding - banner_h
         d.rectangle((padding, y0, canvas_w - padding, y0 + banner_h), outline="black", width=2)
         d.text((padding + 20, y0 + 18), sleep_banner_text, fill="black", font=font_small)
