@@ -16,8 +16,25 @@ def _get_creds(credentials_path: str, token_path: str) -> Credentials:
     if os.path.exists(token_path):
         return Credentials.from_authorized_user_file(token_path, SCOPES)
 
-    flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
-    creds = flow.run_local_server(port=0)
+    flow = InstalledAppFlow.from_client_secrets_file(
+            GOOGLE_CREDENTIALS_FILE,
+            GOOGLE_SCOPES,
+        )
+        # REQUIRED for headless/manual auth
+    flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+
+    auth_url, _ = flow.authorization_url(
+        access_type="offline",
+        prompt="consent"
+    )
+    print("\n" + "=" * 60)
+    print("GOOGLE AUTHORIZATION REQUIRED")
+    print("Open this URL in a browser on any device:")
+    print(auth_url)
+    print("=" * 60 + "\n")
+    code = input("Enter the authorization code here: ").strip()
+    flow.fetch_token(code=code)
+    creds = flow.credentials
     os.makedirs(os.path.dirname(token_path), exist_ok=True)
     with open(token_path, "w", encoding="utf-8") as f:
         f.write(creds.to_json())
