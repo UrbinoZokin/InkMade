@@ -36,7 +36,16 @@ def _today_range(now: datetime, tz: ZoneInfo):
     day_end = day_start + timedelta(days=1)
     return day_start, day_end
 
-
+def _should_force_hourly_refresh(state: State, now: datetime, threshold: timedelta) -> bool:
+    if not state.last_rendered_iso:
+        return False
+    try:
+        last_rendered = datetime.fromisoformat(state.last_rendered_iso)
+    except ValueError:
+        return False
+    if last_rendered.tzinfo is None:
+        last_rendered = last_rendered.replace(tzinfo=now.tzinfo)
+    return (now - last_rendered) >= threshold
 
 def _events_signature(
     tz: ZoneInfo,
@@ -123,8 +132,18 @@ def run_once(config_path: str = CONFIG_PATH_DEFAULT, state_path: str = STATE_PAT
     header_date = now.strftime("%A, %B %-d, %Y")
     show_banner = in_sleep and cfg.sleep.enabled
     sig = _events_signature(tz, events, tomorrow_events, header_date, show_banner)
-    print(f"Fetched {len(events)} events total; in_sleep={in_sleep}, show_banner={show_banner}, force={force}, deep_clean={deep_clean}")
-    if (not force) and (not deep_clean) and (not should_apply_sleep_banner) and (sig == state.last_hash):
+    should_force_hourly = _should_force_hourly_refresh(state, now, timedelta(hours=1))
+    print(
+        f"Fetched {len(events)} events total; in_sleep={in_sleep}, show_banner={show_banner}, "
+        f"force={force}, deep_clean={deep_clean}, hourly_refresh={should_force_hourly}"
+    )
+    if (
+        (not force)
+        and (not deep_clean)
+        and (not should_apply_sleep_banner)
+        and (not should_force_hourly)
+        and (sig == state.last_hash)
+    ):
         print("No schedule change; skipping display refresh")
         return
 
@@ -139,8 +158,6 @@ def run_once(config_path: str = CONFIG_PATH_DEFAULT, state_path: str = STATE_PAT
         tomorrow_events=tomorrow_events,
     )
 
-    # For deep clean, we still "show" normally; if your driver supports explicit full refresh,
-    # you can extend show_on_inky to call it here.
     show_on_inky(img, rotate_degrees=cfg.display.rotate_degrees, border=cfg.display.border)
 
     state.last_hash = sig
