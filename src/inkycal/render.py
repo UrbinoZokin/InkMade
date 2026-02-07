@@ -141,7 +141,15 @@ def render_daily_schedule(
             d.line((padding, y, canvas_w - padding, y), fill="black", width=1)
             y += 16
 
-            time_col_w = 170
+            time_strings = [
+                "All day" if e.all_day else f"{_fmt_time(e.start)}–{_fmt_time(e.end)}"
+                for e in tomorrow_sorted
+            ]
+            max_time_w = max(
+                (d.textlength(s, font=font_time_small) for s in time_strings), default=0
+            )
+            gap = int(font_time_small.size * 0.6)
+            time_col_w = max_time_w
             for e in tomorrow_sorted:
                 if y > max_y:
                     d.text((padding, y), "…", fill="black", font=font_tomorrow_header)
@@ -154,7 +162,7 @@ def render_daily_schedule(
 
                 d.text((padding, y), time_str, fill="black", font=font_time_small)
 
-                x_title = padding + time_col_w
+                x_title = padding + time_col_w + gap
                 title = e.title
                 max_width = canvas_w - padding - x_title
                 words = title.split()
