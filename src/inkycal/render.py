@@ -30,14 +30,18 @@ def render_daily_schedule(
     tz: ZoneInfo,
     show_sleep_banner: bool,
     sleep_banner_text: str,
+    tomorrow_events: Optional[List[Event]] = None,
 ) -> Image.Image:
     img = Image.new("RGB", (canvas_w, canvas_h), "white")
     d = ImageDraw.Draw(img)
 
     font_header = _load_font(60)
+    font_tomorrow_header = _load_font(32)
     font_time = _load_font(36)
     font_title = _load_font(40)
     font_small = _load_font(30)
+    font_time_small = _load_font(24)
+    font_title_small = _load_font(28)
 
     padding = 40
     y = padding
@@ -109,7 +113,61 @@ def render_daily_schedule(
         # subtle separator
         d.line((padding, y, canvas_w - padding, y), fill="black", width=1)
         y += 18
+    if tomorrow_events:
+        tomorrow_sorted = sorted(tomorrow_events, key=_event_sort_key)
+        header_gap = 10
+        tomorrow_header_h = 38
+        if y + header_gap + tomorrow_header_h < max_y:
+            y += header_gap
+            d.text((padding, y), "Tomorrow", fill="black", font=font_tomorrow_header)
+            y += tomorrow_header_h
+            d.line((padding, y, canvas_w - padding, y), fill="black", width=1)
+            y += 16
 
+            time_col_w = 170
+            for e in tomorrow_sorted:
+                if y > max_y:
+                    d.text((padding, y), "…", fill="black", font=font_tomorrow_header)
+                    break
+
+                if e.all_day:
+                    time_str = "All day"
+                else:
+                    time_str = f"{_fmt_time(e.start)}–{_fmt_time(e.end)}"
+
+                d.text((padding, y), time_str, fill="black", font=font_time_small)
+
+                x_title = padding + time_col_w
+                title = e.title
+                max_width = canvas_w - padding - x_title
+                words = title.split()
+                lines = []
+                cur = ""
+                for w in words:
+                    test = (cur + " " + w).strip()
+                    if d.textlength(test, font=font_title_small) <= max_width:
+                        cur = test
+                    else:
+                        if cur:
+                            lines.append(cur)
+                        cur = w
+                if cur:
+                    lines.append(cur)
+                lines = lines[:2]
+
+                for i, line in enumerate(lines):
+                    d.text((x_title, y + i * 32), line, fill="black", font=font_title_small)
+
+                y += max(55, 32 * len(lines) + 8)
+
+                if e.location:
+                    loc = e.location.strip()
+                    if loc:
+                        d.text((x_title, y - 8), loc, fill="black", font=font_small)
+                        y += 22
+
+                d.line((padding, y, canvas_w - padding, y), fill="black", width=1)
+                y += 14
     if show_sleep_banner:
         banner_h = 70
         y0 = canvas_h - padding - banner_h
