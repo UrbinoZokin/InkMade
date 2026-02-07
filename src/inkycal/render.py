@@ -34,10 +34,10 @@ def render_daily_schedule(
     img = Image.new("RGB", (canvas_w, canvas_h), "white")
     d = ImageDraw.Draw(img)
 
-    font_header = _load_font(52)
-    font_time = _load_font(30)
-    font_title = _load_font(34)
-    font_small = _load_font(24)
+    font_header = _load_font(60)
+    font_time = _load_font(36)
+    font_title = _load_font(40)
+    font_small = _load_font(30)
 
     padding = 40
     y = padding
@@ -55,7 +55,10 @@ def render_daily_schedule(
 
     events_sorted = sorted(events, key=_event_sort_key)
 
-    time_col_w = 210
+    time_col_w = 240
+    gap = 30
+    title_line_h = font_title.size + 8
+    min_row_h = 80
     max_y = canvas_h - padding - (70 if show_sleep_banner else 0)
 
     for e in events_sorted:
@@ -72,7 +75,7 @@ def render_daily_schedule(
         d.text((padding, y), time_str, fill="black", font=font_time)
 
         # Title (wrap)
-        x_title = padding + time_col_w
+        x_title = padding + time_col_w + gap
         title = e.title
 
         # Basic wrapping
@@ -93,15 +96,15 @@ def render_daily_schedule(
         lines = lines[:2]  # keep it tidy
 
         for i, line in enumerate(lines):
-            d.text((x_title, y + i * 40), line, fill="black", font=font_title)
+            d.text((x_title, y + i * title_line_h), line, fill="black", font=font_title)
 
-        y += max(70, 40 * len(lines) + 10)
+        y += max(min_row_h, title_line_h * len(lines) + 12)
 
         if e.location:
             loc = e.location.strip()
             if loc:
-                d.text((x_title, y - 10), loc, fill="black", font=font_small)
-                y += 25
+                d.text((x_title, y - 12), loc, fill="black", font=font_small)
+                y += font_small.size + 10
 
         # subtle separator
         d.line((padding, y, canvas_w - padding, y), fill="black", width=1)
