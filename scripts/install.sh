@@ -185,17 +185,16 @@ sudo systemctl enable --now inkycal.timer
 sudo systemctl enable --now inkycal-deepclean.timer
 
 # Quick inky detection (non-fatal)
-echo "-- Checking Inky detection (non-fatal)..."
-try:
-    from inky.auto import auto
-    disp = auto(ask_user=False, verbose=False)
-    if disp is None:
-        print("⚠ Inky auto-detect returned None (check wiring/SPI).")
-    else:
-        print(f"✓ Inky detected: {disp.__class__.__name__}")
-except Exception as e:
-    print(f"⚠ Inky check error: {e}")
-PY
+# echo "-- Checking Inky detection (non-fatal)..."
+# python -c 'try:
+#     from inky.auto import auto
+#     disp = auto(ask_user=False, verbose=False)
+#     if disp is None:
+#         print("⚠ Inky auto-detect returned None (check wiring/SPI).")
+#     else:
+#         print(f"✓ Inky detected: {disp.__class__.__name__}")
+# except Exception as e:
+#     print(f"⚠ Inky check error: {e}")'
 
 # Config presence (non-fatal)
 if [ -f "$APP_DIR/config.yaml" ]; then
