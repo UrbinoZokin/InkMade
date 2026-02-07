@@ -20,5 +20,5 @@ Displays today’s merged Google + iCloud calendar schedule in portrait mode.
 
 # 🚀 Quick Install (one command)
 
-curl -fsSL https://raw.githubusercontent.com/UrbinoZokin/InkMade/main/scripts/bootstrap.sh | \
+curl -fsSL https://raw.githubusercontent.com/UrbinoZokin/InkMade/Calendar_debugging/scripts/bootstrap.sh | \
 REPO_URL="https://github.com/UrbinoZokin/InkMade.git" bash
