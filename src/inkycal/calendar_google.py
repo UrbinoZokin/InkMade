@@ -17,7 +17,7 @@ def _get_creds(credentials_path: str, token_path: str) -> Credentials:
         return Credentials.from_authorized_user_file(token_path, SCOPES)
 
     flow = InstalledAppFlow.from_client_secrets_file(
-            token_path,
+            credentials_path,
             SCOPES,
         )
         # REQUIRED for headless/manual auth
