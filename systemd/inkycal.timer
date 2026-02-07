@@ -1,9 +1,9 @@
 [Unit]
-Description=InkyCal - Run at boot and every 15 minutes
+Description=InkyCal - Run at boot and every quarter hour
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=15min
+OnCalendar=*:0/15
 Persistent=true
 
 [Install]
