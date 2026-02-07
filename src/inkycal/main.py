@@ -36,22 +36,30 @@ def _today_range(now: datetime, tz: ZoneInfo):
     day_end = day_start + timedelta(days=1)
     return day_start, day_end
 
-def _events_signature(tz: ZoneInfo, events: List[Event], header_date: str, sleep_banner: bool) -> str:
+
+
+def _events_signature(
+    tz: ZoneInfo,
+    events: List[Event],
+    tomorrow_events: List[Event],
+    header_date: str,
+    sleep_banner: bool,
+    ) -> str:
     # Only include fields that affect rendering.
+    def _event_payload(e: Event) -> dict:
+        return {
+            "source": e.source,
+            "title": e.title,
+            "start": e.start.astimezone(tz).isoformat(),
+            "end": e.end.astimezone(tz).isoformat(),
+            "all_day": e.all_day,
+            "location": e.location or "",
+        }    
     payload = {
         "header_date": header_date,
         "sleep_banner": sleep_banner,
-        "events": [
-            {
-                "source": e.source,
-                "title": e.title,
-                "start": e.start.astimezone(tz).isoformat(),
-                "end": e.end.astimezone(tz).isoformat(),
-                "all_day": e.all_day,
-                "location": e.location or "",
-            }
-            for e in events
-        ],
+        "events": [_event_payload(e) for e in events],
+        "tomorrow_events": [_event_payload(e) for e in tomorrow_events],
     }
     b = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(b).hexdigest()
@@ -85,26 +93,36 @@ def run_once(config_path: str = CONFIG_PATH_DEFAULT, state_path: str = STATE_PAT
 
     # Fetch events (only needed if we're not just placing a banner)
     day_start, day_end = _today_range(now, tz)
-
+    tomorrow_start = day_start + timedelta(days=1)
+    tomorrow_end = day_end + timedelta(days=1)
     events: List[Event] = []
+    tomorrow_events: List[Event] = []
     if cfg.google.enabled:
         creds_path = os.environ.get("GOOGLE_CREDENTIALS_JSON", "")
         token_path = os.environ.get("GOOGLE_TOKEN_JSON", "")
         if creds_path and token_path:
             events.extend(fetch_google_events(cfg.google.calendar_ids, day_start, day_end, tz, creds_path, token_path))
+            tomorrow_events.extend(
+                fetch_google_events(cfg.google.calendar_ids, tomorrow_start, tomorrow_end, tz, creds_path, token_path)
+            )
 
     # if cfg.icloud.enabled:
     #     user = os.environ.get("ICLOUD_USERNAME", "")
     #     pw = os.environ.get("ICLOUD_APP_PASSWORD", "")
     #     if user and pw:
     #         events.extend(fetch_icloud_events(day_start, day_end, tz, user, pw, cfg.icloud.calendar_name_allowlist))
+    #         tomorrow_events.extend(
+    #             fetch_icloud_events(
+    #                 tomorrow_start, tomorrow_end, tz, user, pw, cfg.icloud.calendar_name_allowlist
+    #             )
+    #         )
     
     
     
     # Render signature includes whether we show the sleep banner
     header_date = now.strftime("%A, %B %-d, %Y")
     show_banner = in_sleep and cfg.sleep.enabled
-    sig = _events_signature(tz, events, header_date, show_banner)
+    sig = _events_signature(tz, events, tomorrow_events, header_date, show_banner)
     print(f"Fetched {len(events)} events total; in_sleep={in_sleep}, show_banner={show_banner}, force={force}, deep_clean={deep_clean}")
     if (not force) and (not deep_clean) and (not should_apply_sleep_banner) and (sig == state.last_hash):
         print("No schedule change; skipping display refresh")
@@ -118,6 +136,7 @@ def run_once(config_path: str = CONFIG_PATH_DEFAULT, state_path: str = STATE_PAT
         tz=tz,
         show_sleep_banner=show_banner,
         sleep_banner_text=cfg.sleep.banner_text,
+        tomorrow_events=tomorrow_events,
     )
 
     # For deep clean, we still "show" normally; if your driver supports explicit full refresh,
