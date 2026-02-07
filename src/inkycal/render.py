@@ -11,9 +11,9 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont:
     # DejaVu is commonly available on Raspberry Pi; install via apt in scripts/install.sh
     return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
 
-def _format_header(now: datetime) -> str:
-    # Example: Thursday, February 5, 2026
-    return now.strftime("%A, %B %-d, %Y")
+def _format_header(now: datetime) -> tuple[str, str]:
+    # Example: Thursday / February 5, 2026
+    return now.strftime("%A"), now.strftime("%B %-d, %Y")
 
 def _fmt_time(dt: datetime) -> str:
     return dt.strftime("%-I:%M %p").lower()
@@ -46,9 +46,18 @@ def render_daily_schedule(
     padding = 40
     y = padding
 
-    header = _format_header(now.astimezone(tz))
-    d.text((padding, y), header, fill="black", font=font_header)
-    y += 80
+    header_day, header_date = _format_header(now.astimezone(tz))
+    header_gap = 8
+    header_bottom_gap = 12
+    header_line_h = font_header.size + 6
+    header_day_w = d.textlength(header_day, font=font_header)
+    header_day_x = (canvas_w - header_day_w) / 2
+    d.text((header_day_x, y), header_day, fill="black", font=font_header)
+    y += header_line_h + header_gap
+    header_date_w = d.textlength(header_date, font=font_header)
+    header_date_x = (canvas_w - header_date_w) / 2
+    d.text((header_date_x, y), header_date, fill="black", font=font_header)
+    y += header_line_h + header_bottom_gap
 
     # Divider
     d.line((padding, y, canvas_w - padding, y), fill="black", width=2)
