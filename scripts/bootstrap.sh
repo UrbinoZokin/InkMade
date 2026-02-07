@@ -26,7 +26,7 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   
 else
   echo "Cloning repo..."
-  git clone "$REPO_URL" "$INSTALL_DIR"
+  git clone -b Calendar_debugging "$REPO_URL" "$INSTALL_DIR"
   cd "$INSTALL_DIR"
 fi
 
