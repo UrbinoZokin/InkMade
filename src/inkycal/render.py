@@ -30,6 +30,7 @@ def render_daily_schedule(
     tz: ZoneInfo,
     show_sleep_banner: bool,
     sleep_banner_text: str,
+    wifi_status: str = "connected",
     tomorrow_events: Optional[List[Event]] = None,
 ) -> Image.Image:
     img = Image.new("RGB", (canvas_w, canvas_h), "white")
@@ -204,6 +205,8 @@ def render_daily_schedule(
     updated_text = f"Updated: {now.astimezone(tz).strftime('%-I:%M %p').lower()}"
     updated_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - updated_text_h
     d.text((padding, updated_y), updated_text, fill="black", font=font_small)
+    usable_canvas_h = canvas_h - (banner_h if show_sleep_banner else 0)
+    _draw_wifi_status(d, canvas_w, usable_canvas_h, padding, wifi_status, font_small)
     
     if show_sleep_banner:
         y0 = canvas_h - padding - banner_h
@@ -211,3 +214,40 @@ def render_daily_schedule(
         d.text((padding + 20, y0 + 18), sleep_banner_text, fill="black", font=font_small)
 
     return img
+
+def _draw_wifi_status(
+    draw: ImageDraw.ImageDraw,
+    canvas_w: int,
+    canvas_h: int,
+    padding: int,
+    status: str,
+    font: ImageFont.FreeTypeFont,
+) -> None:
+    if not status:
+        return
+
+    status = status.lower().strip()
+    icon_size = max(18, int(font.size * 0.9))
+    right = canvas_w - padding
+    bottom = canvas_h - padding
+    left = right - icon_size
+    top = bottom - icon_size
+    center_x = (left + right) / 2
+    center_y = bottom
+
+    arc_count = 3
+    arc_step = icon_size * 0.18
+    for i in range(arc_count):
+        inset = i * arc_step
+        bbox = (left + inset, top + inset, right - inset, bottom - inset)
+        draw.arc(bbox, start=200, end=340, fill="black", width=2)
+
+    dot_r = max(2, int(icon_size * 0.08))
+    draw.ellipse(
+        (center_x - dot_r, center_y - dot_r - 2, center_x + dot_r, center_y + dot_r - 2),
+        fill="black",
+    )
+
+    if status == "disconnected":
+        draw.line((left, top, right, bottom), fill="black", width=3)
+        draw.line((left, bottom, right, top), fill="black", width=3)
