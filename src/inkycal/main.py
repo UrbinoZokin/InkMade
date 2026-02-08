@@ -155,6 +155,7 @@ def run_once(config_path: str = CONFIG_PATH_DEFAULT, state_path: str = STATE_PAT
         tz=tz,
         show_sleep_banner=show_banner,
         sleep_banner_text=cfg.sleep.banner_text,
+        wifi_status="connected",
         tomorrow_events=tomorrow_events,
     )
 
