@@ -31,6 +31,7 @@ def render_daily_schedule(
     show_sleep_banner: bool,
     sleep_banner_text: str,
     wifi_status: str = "connected",
+    ups_status: Optional[dict] = None,
     tomorrow_events: Optional[List[Event]] = None,
 ) -> Image.Image:
     img = Image.new("RGB", (canvas_w, canvas_h), "white")
@@ -76,9 +77,23 @@ def render_daily_schedule(
     title_line_h = font_title.size + 8
     min_row_h = 80
     banner_h = 70
+    ups_text = _format_ups_status(ups_status)
     updated_gap = 10
     updated_text_h = font_small.size + 6
+    updated_text = f"Updated: {now.astimezone(tz).strftime('%-I:%M %p').lower()}"
+    updated_text_w = d.textlength(updated_text, font=font_small)
     updated_block_h = updated_text_h + updated_gap
+    ups_on_second_line = False
+    ups_text_h = font_small.size + 6
+    wifi_icon_size = max(18, int(font_small.size * 0.9))
+    wifi_left = canvas_w - padding - wifi_icon_size
+    if ups_text:
+        ups_text_w = d.textlength(ups_text, font=font_small)
+        ups_right = wifi_left - 10
+        min_ups_x = padding + updated_text_w + 10
+        if ups_right - ups_text_w < min_ups_x:
+            ups_on_second_line = True
+            updated_block_h += ups_text_h + 8
     max_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - updated_block_h
 
     for e in events_sorted:
@@ -202,18 +217,55 @@ def render_daily_schedule(
 
                 d.line((padding, y, canvas_w - padding, y), fill="black", width=1)
                 y += 14
-    updated_text = f"Updated: {now.astimezone(tz).strftime('%-I:%M %p').lower()}"
-    updated_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - updated_text_h
+    bottom_y = canvas_h - padding - (banner_h if show_sleep_banner else 0)
+    updated_y = bottom_y - updated_text_h
+    if ups_text:
+        ups_text_w = d.textlength(ups_text, font=font_small)
+        ups_right = wifi_left - 10
+        if ups_on_second_line:
+            ups_x = padding
+            ups_y = updated_y - ups_text_h - 8
+        else:
+            ups_x = max(padding, ups_right - ups_text_w)
+            ups_y = updated_y
+        d.text((ups_x, ups_y), ups_text, fill="black", font=font_small)
     d.text((padding, updated_y), updated_text, fill="black", font=font_small)
     usable_canvas_h = canvas_h - (banner_h if show_sleep_banner else 0)
     _draw_wifi_status(d, canvas_w, usable_canvas_h, padding, wifi_status, font_small)
-    
+
     if show_sleep_banner:
         y0 = canvas_h - padding - banner_h
         d.rectangle((padding, y0, canvas_w - padding, y0 + banner_h), outline="black", width=2)
         d.text((padding + 20, y0 + 18), sleep_banner_text, fill="black", font=font_small)
 
     return img
+
+def _format_ups_status(ups_status: Optional[dict]) -> Optional[str]:
+    if not ups_status:
+        return None
+
+    percent_value = (
+        ups_status.get("battery_percent")
+        or ups_status.get("battery_percentage")
+        or ups_status.get("battery")
+    )
+    power_source = (
+        ups_status.get("power_source")
+        or ups_status.get("source")
+        or ups_status.get("status")
+    )
+    if percent_value is None or not power_source:
+        return None
+
+    try:
+        percent = float(percent_value)
+    except (TypeError, ValueError):
+        return None
+
+    if percent <= 1:
+        percent *= 100
+    percent = int(round(percent))
+    return f"Battery {percent}% · {power_source}"
 
 def _draw_wifi_status(
     draw: ImageDraw.ImageDraw,
