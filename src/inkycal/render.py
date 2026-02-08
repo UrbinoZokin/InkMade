@@ -31,6 +31,7 @@ def render_daily_schedule(
     show_sleep_banner: bool,
     sleep_banner_text: str,
     wifi_status: str = "connected",
+    ups_status: Optional[dict] = None,
     tomorrow_events: Optional[List[Event]] = None,
 ) -> Image.Image:
     img = Image.new("RGB", (canvas_w, canvas_h), "white")
