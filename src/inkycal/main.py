@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from .config import load_config
 from .models import Event
 from .state import load_state, save_state, State
+from .network import get_wifi_status
 from .render import render_daily_schedule
 from .display_inky import show_on_inky
 from .calendar_google import fetch_google_events
@@ -53,6 +54,7 @@ def _events_signature(
     tomorrow_events: List[Event],
     header_date: str,
     sleep_banner: bool,
+    wifi_status: str,
     ) -> str:
     # Only include fields that affect rendering.
     def _event_payload(e: Event) -> dict:
@@ -67,6 +69,7 @@ def _events_signature(
     payload = {
         "header_date": header_date,
         "sleep_banner": sleep_banner,
+        "wifi_status": wifi_status,
         "events": [_event_payload(e) for e in events],
         "tomorrow_events": [_event_payload(e) for e in tomorrow_events],
     }
@@ -131,7 +134,8 @@ def run_once(config_path: str = CONFIG_PATH_DEFAULT, state_path: str = STATE_PAT
     # Render signature includes whether we show the sleep banner
     header_date = now.strftime("%A, %B %-d, %Y")
     show_banner = in_sleep and cfg.sleep.enabled
-    sig = _events_signature(tz, events, tomorrow_events, header_date, show_banner)
+    wifi_status = get_wifi_status()
+    sig = _events_signature(tz, events, tomorrow_events, header_date, show_banner, wifi_status)
     should_force_hourly = _should_force_hourly_refresh(state, now, timedelta(hours=1))
     print(
         f"Fetched {len(events)} events total; in_sleep={in_sleep}, show_banner={show_banner}, "
@@ -155,7 +159,7 @@ def run_once(config_path: str = CONFIG_PATH_DEFAULT, state_path: str = STATE_PAT
         tz=tz,
         show_sleep_banner=show_banner,
         sleep_banner_text=cfg.sleep.banner_text,
-        wifi_status="connected",
+        wifi_status=wifi_status,
         tomorrow_events=tomorrow_events,
     )
 
