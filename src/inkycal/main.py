@@ -126,16 +126,16 @@ def run_once(config_path: str = CONFIG_PATH_DEFAULT, state_path: str = STATE_PAT
                 fetch_google_events(cfg.google.calendar_ids, tomorrow_start, tomorrow_end, tz, creds_path, token_path)
             )
 
-    # if cfg.icloud.enabled:
-    #     user = os.environ.get("ICLOUD_USERNAME", "")
-    #     pw = os.environ.get("ICLOUD_APP_PASSWORD", "")
-    #     if user and pw:
-    #         events.extend(fetch_icloud_events(day_start, day_end, tz, user, pw, cfg.icloud.calendar_name_allowlist))
-    #         tomorrow_events.extend(
-    #             fetch_icloud_events(
-    #                 tomorrow_start, tomorrow_end, tz, user, pw, cfg.icloud.calendar_name_allowlist
-    #             )
-    #         )
+     if cfg.icloud.enabled:
+         user = os.environ.get("ICLOUD_USERNAME", "")
+         pw = os.environ.get("ICLOUD_APP_PASSWORD", "")
+         if user and pw:
+             events.extend(fetch_icloud_events(day_start, day_end, tz, user, pw, cfg.icloud.calendar_name_allowlist))
+             tomorrow_events.extend(
+                 fetch_icloud_events(
+                     tomorrow_start, tomorrow_end, tz, user, pw, cfg.icloud.calendar_name_allowlist
+                 )
+             )
     
     
     
