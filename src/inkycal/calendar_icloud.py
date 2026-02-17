@@ -1,15 +1,28 @@
 from __future__ import annotations
 from datetime import datetime
+import logging
 from typing import List
 from zoneinfo import ZoneInfo
-import os
 
 import caldav
-from caldav.elements import dav, cdav
+from caldav.elements import dav
 
 from .models import Event
 
 ICLOUD_CALDAV_URL = "https://caldav.icloud.com/"
+_ICAL_COMPAT_MSG = "Ical data was modified to avoid compatibility issues"
+
+
+class _IcalCompatibilityFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return _ICAL_COMPAT_MSG not in record.getMessage()
+
+
+def _install_ical_compatibility_filter() -> None:
+    root_logger = logging.getLogger()
+    if any(isinstance(f, _IcalCompatibilityFilter) for f in root_logger.filters):
+        return
+    root_logger.addFilter(_IcalCompatibilityFilter())
 
 def fetch_icloud_events(
     day_start: datetime,
@@ -19,6 +32,8 @@ def fetch_icloud_events(
     app_password: str,
     calendar_name_allowlist: List[str],
 ) -> List[Event]:
+    _install_ical_compatibility_filter()
+
     client = caldav.DAVClient(
         url=ICLOUD_CALDAV_URL,
         username=username,
