@@ -127,15 +127,20 @@ def run_once(config_path: str = CONFIG_PATH_DEFAULT, state_path: str = STATE_PAT
             )
 
     if cfg.icloud.enabled:
-        user = os.environ.get("ICLOUD_USERNAME", "")
-        pw = os.environ.get("ICLOUD_APP_PASSWORD", "")
-        if user and pw:
-            events.extend(fetch_icloud_events(day_start, day_end, tz, user, pw, cfg.icloud.calendar_name_allowlist))
-            tomorrow_events.extend(
-                fetch_icloud_events(
-                    tomorrow_start, tomorrow_end, tz, user, pw, cfg.icloud.calendar_name_allowlist
+        try
+            user = os.environ.get("ICLOUD_USERNAME", "")
+            pw = os.environ.get("ICLOUD_APP_PASSWORD", "")
+            if user and pw:
+                events.extend(fetch_icloud_events(day_start, day_end, tz, user, pw, cfg.icloud.calendar_name_allowlist))
+                tomorrow_events.extend(
+                    fetch_icloud_events(
+                        tomorrow_start, tomorrow_end, tz, user, pw, cfg.icloud.calendar_name_allowlist
+                    )
                 )
-            )
+            else:
+                print("iCloud enabled but ICLOUD_USERNAME/ICLOUD_APP_PASSWORD not set; skipping iCloud.")
+        except Exception as e:
+            print(f"iCloud fetch failed; continuing without iCloud. Error: {e}")
     
     
     
