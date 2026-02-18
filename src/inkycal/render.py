@@ -139,8 +139,7 @@ def render_daily_schedule(
             d.text((padding, y), "…", fill="black", font=font_header)
             break
 
-        # Time column
-        d.text((padding, y), time_str, fill="black", font=font_time)
+        # Time column (right-aligned to the widest time label)
         time_w = d.textlength(time_str, font=font_time)
         x_time = padding + max(0, time_col_w - time_w)
         d.text((x_time, y), time_str, fill="black", font=font_time)
