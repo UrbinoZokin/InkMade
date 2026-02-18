@@ -23,6 +23,13 @@ def _event_sort_key(e: Event):
     return (0 if e.all_day else 1, e.start, e.title.lower())
 
 
+def _title_with_weather(e: Event) -> str:
+    weather_parts = [part for part in [e.weather_icon, e.weather_text] if part]
+    if not weather_parts:
+        return e.title
+    return f"{' '.join(weather_parts)} {e.title}".strip()
+
+
 def _wrap_text(
     draw: ImageDraw.ImageDraw,
     text: str,
@@ -119,7 +126,7 @@ def render_daily_schedule(
         x_title = padding if e.all_day else padding + time_col_w + gap
         max_width = (canvas_w - (2 * padding)) if e.all_day else (canvas_w - padding - x_title)
         max_lines = None if e.all_day else 2
-        lines = _wrap_text(d, e.title, font_title, max_width, max_lines=max_lines)
+        lines = _wrap_text(d, _title_with_weather(e), font_title, max_width, max_lines=max_lines)
 
         row_start_y = y
         content_y = row_start_y + title_line_h * len(lines) + 6
@@ -189,7 +196,7 @@ def render_daily_schedule(
                 profile_lines = [
                     _wrap_text(
                         d,
-                        e.title,
+                        _title_with_weather(e),
                         profile_title_font,
                         (canvas_w - (2 * padding))
                         if e.all_day
@@ -232,7 +239,7 @@ def render_daily_schedule(
                 chosen_lines = [
                     _wrap_text(
                         d,
-                        e.title,
+                        _title_with_weather(e),
                         title_font,
                         (canvas_w - (2 * padding))
                         if e.all_day

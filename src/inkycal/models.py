@@ -12,3 +12,5 @@ class Event:
     all_day: bool = False
     location: Optional[str] = None
     travel_time_text: Optional[str] = None
+    weather_icon: Optional[str] = None
+    weather_text: Optional[str] = None
