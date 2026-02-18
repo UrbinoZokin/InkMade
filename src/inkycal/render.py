@@ -22,6 +22,29 @@ def _event_sort_key(e: Event):
     # all-day first, then start time, then title
     return (0 if e.all_day else 1, e.start, e.title.lower())
 
+
+def _wrap_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    max_width: float,
+    max_lines: int = 2,
+) -> List[str]:
+    words = text.split()
+    lines: List[str] = []
+    cur = ""
+    for w in words:
+        test = (cur + " " + w).strip()
+        if draw.textlength(test, font=font) <= max_width:
+            cur = test
+        else:
+            if cur:
+                lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    return lines[:max_lines]
+
 def render_daily_schedule(
     canvas_w: int,
     canvas_h: int,
@@ -42,8 +65,6 @@ def render_daily_schedule(
     font_time = _load_font(46)
     font_title = _load_font(52)
     font_small = _load_font(30)
-    font_time_small = _load_font(30)
-    font_title_small = _load_font(34)
 
     padding = 40
     y = padding
@@ -97,53 +118,40 @@ def render_daily_schedule(
     max_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - updated_block_h
 
     for e in events_sorted:
-        if y > max_y:
-            d.text((padding, y), "…", fill="black", font=font_header)
-            break
-
         if e.all_day:
             time_str = "All day"
         else:
             time_str = f"{_fmt_time(e.start)}–{_fmt_time(e.end)}"
+
+        x_title = padding + time_col_w + gap
+        max_width = canvas_w - padding - x_title
+        lines = _wrap_text(d, e.title, font_title, max_width, max_lines=2)
+
+        row_start_y = y
+        content_y = row_start_y + title_line_h * len(lines) + 6
+        detail_text = (e.travel_time_text or "").strip()
+        if detail_text:
+            content_y += font_small.size + 8
+        row_h = max(min_row_h, content_y - row_start_y + 8)
+        total_row_h = row_h + 18
+
+        if y + total_row_h > max_y:
+            d.text((padding, y), "…", fill="black", font=font_header)
+            break
 
         # Time column
         d.text((padding, y), time_str, fill="black", font=font_time)
         time_w = d.textlength(time_str, font=font_time)
         x_time = padding + max(0, time_col_w - time_w)
         d.text((x_time, y), time_str, fill="black", font=font_time)
-        # Title (wrap)
-        x_title = padding + time_col_w + gap
-        title = e.title
-
-        # Basic wrapping
-        max_width = canvas_w - padding - x_title
-        words = title.split()
-        lines = []
-        cur = ""
-        for w in words:
-            test = (cur + " " + w).strip()
-            if d.textlength(test, font=font_title) <= max_width:
-                cur = test
-            else:
-                if cur:
-                    lines.append(cur)
-                cur = w
-        if cur:
-            lines.append(cur)
-        lines = lines[:2]  # keep it tidy
 
         for i, line in enumerate(lines):
             d.text((x_title, y + i * title_line_h), line, fill="black", font=font_title)
 
-        row_start_y = y
-        content_y = row_start_y + title_line_h * len(lines) + 6
-
-        detail_text = (e.travel_time_text or "").strip()
         if detail_text:
             d.text((x_title, content_y), detail_text, fill="black", font=font_small)
             content_y += font_small.size + 8
 
-        row_h = max(min_row_h, content_y - row_start_y + 8)
         y = row_start_y + row_h
 
         # subtle separator
@@ -160,61 +168,113 @@ def render_daily_schedule(
             d.line((padding, y, canvas_w - padding, y), fill="black", width=1)
             y += 16
 
-            time_strings = [
-                "All day" if e.all_day else f"{_fmt_time(e.start)}–{_fmt_time(e.end)}"
-                for e in tomorrow_sorted
+            tomorrow_profiles = [
+                {"time": 30, "title": 34, "title_line_h": 32, "min_row_h": 55, "sep": 14},
+                {"time": 28, "title": 32, "title_line_h": 30, "min_row_h": 52, "sep": 12},
+                {"time": 26, "title": 30, "title_line_h": 28, "min_row_h": 48, "sep": 10},
+                {"time": 24, "title": 28, "title_line_h": 26, "min_row_h": 44, "sep": 8},
+                {"time": 22, "title": 26, "title_line_h": 24, "min_row_h": 42, "sep": 8},
             ]
-            max_time_w = max(
-                (d.textlength(s, font=font_time_small) for s in time_strings), default=0
+
+            chosen_profile = tomorrow_profiles[-1]
+            chosen_lines: List[List[str]] = []
+            chosen_time_strings: List[str] = []
+            for profile in tomorrow_profiles:
+                profile_time_font = _load_font(profile["time"])
+                profile_title_font = _load_font(profile["title"])
+                profile_time_strings = [
+                    "All day" if e.all_day else f"{_fmt_time(e.start)}–{_fmt_time(e.end)}"
+                    for e in tomorrow_sorted
+                ]
+                profile_time_w = max(
+                    (d.textlength(s, font=profile_time_font) for s in profile_time_strings),
+                    default=0,
+                )
+                profile_gap = int(profile_time_font.size * 0.6)
+                x_title = padding + profile_time_w + profile_gap
+                max_width = canvas_w - padding - x_title
+                profile_lines = [
+                    _wrap_text(d, e.title, profile_title_font, max_width, max_lines=2)
+                    for e in tomorrow_sorted
+                ]
+                test_y = y
+                fits = True
+                for e, lines in zip(tomorrow_sorted, profile_lines):
+                    content_y = test_y + profile["title_line_h"] * len(lines) + 4
+                    if (e.travel_time_text or "").strip():
+                        content_y += font_small.size + 6
+                    row_h = max(profile["min_row_h"], content_y - test_y + 6)
+                    total_h = row_h + profile["sep"]
+                    if test_y + total_h > max_y:
+                        fits = False
+                        break
+                    test_y += total_h
+                if fits:
+                    chosen_profile = profile
+                    chosen_lines = profile_lines
+                    chosen_time_strings = profile_time_strings
+                    break
+
+            time_font = _load_font(chosen_profile["time"])
+            title_font = _load_font(chosen_profile["title"])
+            if not chosen_lines:
+                chosen_time_strings = [
+                    "All day" if e.all_day else f"{_fmt_time(e.start)}–{_fmt_time(e.end)}"
+                    for e in tomorrow_sorted
+                ]
+                fallback_time_w = max(
+                    (d.textlength(s, font=time_font) for s in chosen_time_strings),
+                    default=0,
+                )
+                fallback_gap = int(time_font.size * 0.6)
+                x_title = padding + fallback_time_w + fallback_gap
+                max_width = canvas_w - padding - x_title
+                chosen_lines = [
+                    _wrap_text(d, e.title, title_font, max_width, max_lines=2)
+                    for e in tomorrow_sorted
+                ]
+
+            time_col_w = max(
+                (d.textlength(s, font=time_font) for s in chosen_time_strings),
+                default=0,
             )
-            gap = int(font_time_small.size * 0.6)
-            time_col_w = max_time_w
-            for e in tomorrow_sorted:
-                if y > max_y:
+            gap = int(time_font.size * 0.6)
+
+            for e, lines, time_str in zip(tomorrow_sorted, chosen_lines, chosen_time_strings):
+                row_start_y = y
+                content_y = row_start_y + chosen_profile["title_line_h"] * len(lines) + 4
+                detail_text = (e.travel_time_text or "").strip()
+                if detail_text:
+                    content_y += font_small.size + 6
+                row_h = max(chosen_profile["min_row_h"], content_y - row_start_y + 6)
+                total_h = row_h + chosen_profile["sep"]
+
+                if y + total_h > max_y:
                     d.text((padding, y), "…", fill="black", font=font_tomorrow_header)
                     break
 
-                if e.all_day:
-                    time_str = "All day"
-                else:
-                    time_str = f"{_fmt_time(e.start)}–{_fmt_time(e.end)}"
-
-                d.text((padding, y), time_str, fill="black", font=font_time_small)
+                d.text((padding, y), time_str, fill="black", font=time_font)
 
                 x_title = padding + time_col_w + gap
-                title = e.title
-                max_width = canvas_w - padding - x_title
-                words = title.split()
-                lines = []
-                cur = ""
-                for w in words:
-                    test = (cur + " " + w).strip()
-                    if d.textlength(test, font=font_title_small) <= max_width:
-                        cur = test
-                    else:
-                        if cur:
-                            lines.append(cur)
-                        cur = w
-                if cur:
-                    lines.append(cur)
-                lines = lines[:2]
-
                 for i, line in enumerate(lines):
-                    d.text((x_title, y + i * 32), line, fill="black", font=font_title_small)
+                    d.text(
+                        (x_title, y + i * chosen_profile["title_line_h"]),
+                        line,
+                        fill="black",
+                        font=title_font,
+                    )
 
-                row_start_y = y
-                content_y = row_start_y + 32 * len(lines) + 4
-
-                detail_text = (e.travel_time_text or "").strip()
                 if detail_text:
-                    d.text((x_title, content_y), detail_text, fill="black", font=font_small)
-                    content_y += font_small.size + 6
+                    d.text(
+                        (x_title, row_start_y + chosen_profile["title_line_h"] * len(lines) + 4),
+                        detail_text,
+                        fill="black",
+                        font=font_small,
+                    )
 
-                row_h = max(55, content_y - row_start_y + 6)
                 y = row_start_y + row_h
-
                 d.line((padding, y, canvas_w - padding, y), fill="black", width=1)
-                y += 14
+                y += chosen_profile["sep"]
     bottom_y = canvas_h - padding - (banner_h if show_sleep_banner else 0)
     updated_y = bottom_y - updated_text_h
     if ups_text:
