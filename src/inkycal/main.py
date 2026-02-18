@@ -75,17 +75,14 @@ def _merge_all_day_events(events: List[Event]) -> List[Event]:
     all_day_events = [e for e in events if e.all_day]
     timed_events = [e for e in events if not e.all_day]
     if not all_day_events:
-        return timed_events
+        return sorted(timed_events, key=_event_sort_key)
 
-    sorted_titles = sorted(e.title.strip() for e in all_day_events if e.title.strip())
-    if not sorted_titles:
-        summary_title = "All-day events"
-    elif len(sorted_titles) == 1:
-        summary_title = f"All-day: {sorted_titles[0]}"
-    elif len(sorted_titles) == 2:
-        summary_title = f"All-day: {sorted_titles[0]}, {sorted_titles[1]}"
+    sorted_titles = [e.title.strip() for e in all_day_events if e.title.strip()]
+    sorted_titles.sort(key=str.lower)
+    if sorted_titles:
+        summary_title = "All-day: " + " • ".join(sorted_titles)
     else:
-        summary_title = f"All-day: {sorted_titles[0]}, {sorted_titles[1]}, +{len(sorted_titles) - 2} more"
+        summary_title = "All-day events"
 
     merged = Event(
         source="merged",
@@ -94,6 +91,7 @@ def _merge_all_day_events(events: List[Event]) -> List[Event]:
         end=max(e.end for e in all_day_events),
         all_day=True,
     )
+
     return [merged, *sorted(timed_events, key=_event_sort_key)]
 
 
