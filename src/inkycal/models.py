@@ -11,3 +11,4 @@ class Event:
     end: datetime               # timezone-aware
     all_day: bool = False
     location: Optional[str] = None
+    travel_time_text: Optional[str] = None

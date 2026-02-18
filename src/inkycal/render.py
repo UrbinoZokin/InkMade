@@ -138,11 +138,10 @@ def render_daily_schedule(
         row_start_y = y
         content_y = row_start_y + title_line_h * len(lines) + 6
 
-        if e.location:
-            loc = e.location.strip()
-            if loc:
-                d.text((x_title, content_y), loc, fill="black", font=font_small)
-                content_y += font_small.size + 8
+        detail_text = (e.travel_time_text or "").strip()
+        if detail_text:
+            d.text((x_title, content_y), detail_text, fill="black", font=font_small)
+            content_y += font_small.size + 8
 
         row_h = max(min_row_h, content_y - row_start_y + 8)
         y = row_start_y + row_h
@@ -206,11 +205,10 @@ def render_daily_schedule(
                 row_start_y = y
                 content_y = row_start_y + 32 * len(lines) + 4
 
-                if e.location:
-                    loc = e.location.strip()
-                    if loc:
-                        d.text((x_title, content_y), loc, fill="black", font=font_small)
-                        content_y += font_small.size + 6
+                detail_text = (e.travel_time_text or "").strip()
+                if detail_text:
+                    d.text((x_title, content_y), detail_text, fill="black", font=font_small)
+                    content_y += font_small.size + 6
 
                 row_h = max(55, content_y - row_start_y + 6)
                 y = row_start_y + row_h

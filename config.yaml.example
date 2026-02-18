@@ -30,3 +30,8 @@ calendars:
   icloud:
     enabled: true
     calendar_name_allowlist: []  # empty means all discovered calendars
+
+travel:
+  enabled: false
+  origin_address: "123 Main St, Springfield, IL"
+  back_to_back_window_minutes: 30
