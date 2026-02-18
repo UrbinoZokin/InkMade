@@ -116,9 +116,8 @@ def render_daily_schedule(
 
     for e in events_sorted:
         time_str = "" if e.all_day else f"{_fmt_time(e.start)}–{_fmt_time(e.end)}"
-
-        x_title = padding + time_col_w + gap
-        max_width = canvas_w - padding - x_title
+        x_title = padding if e.all_day else padding + time_col_w + gap
+        max_width = (canvas_w - (2 * padding)) if e.all_day else (canvas_w - padding - x_title)
         max_lines = None if e.all_day else 2
         lines = _wrap_text(d, e.title, font_title, max_width, max_lines=max_lines)
 
@@ -136,7 +135,6 @@ def render_daily_schedule(
 
         # Time column
         if time_str:
-            d.text((padding, y), time_str, fill="black", font=font_time)
             time_w = d.textlength(time_str, font=font_time)
             x_time = padding + max(0, time_col_w - time_w)
             d.text((x_time, y), time_str, fill="black", font=font_time)
@@ -188,14 +186,14 @@ def render_daily_schedule(
                     default=0,
                 )
                 profile_gap = int(profile_time_font.size * 0.6)
-                x_title = padding + profile_time_w + profile_gap
-                max_width = canvas_w - padding - x_title
                 profile_lines = [
                     _wrap_text(
                         d,
                         e.title,
                         profile_title_font,
-                        max_width,
+                        (canvas_w - (2 * padding))
+                        if e.all_day
+                        else (canvas_w - padding - (padding + profile_time_w + profile_gap)),
                         max_lines=None if e.all_day else 2,
                     )
                     for e in tomorrow_sorted
@@ -231,14 +229,14 @@ def render_daily_schedule(
                     default=0,
                 )
                 fallback_gap = int(time_font.size * 0.6)
-                x_title = padding + fallback_time_w + fallback_gap
-                max_width = canvas_w - padding - x_title
                 chosen_lines = [
                     _wrap_text(
                         d,
                         e.title,
                         title_font,
-                        max_width,
+                        (canvas_w - (2 * padding))
+                        if e.all_day
+                        else (canvas_w - padding - (padding + fallback_time_w + fallback_gap)),
                         max_lines=None if e.all_day else 2,
                     )
                     for e in tomorrow_sorted
@@ -267,7 +265,7 @@ def render_daily_schedule(
                 if time_str:
                     d.text((padding, y), time_str, fill="black", font=time_font)
 
-                x_title = padding + time_col_w + gap
+                x_title = padding if e.all_day else padding + time_col_w + gap
                 for i, line in enumerate(lines):
                     d.text(
                         (x_title, y + i * chosen_profile["title_line_h"]),
