@@ -27,6 +27,65 @@ def _weather_label(e: Event) -> str:
     return " ".join(part for part in [e.weather_icon, e.weather_text] if part).strip()
 
 
+
+def _lerp_color(start: tuple[int, int, int], end: tuple[int, int, int], ratio: float) -> tuple[int, int, int]:
+    return tuple(int(round(s + (e - s) * ratio)) for s, e in zip(start, end))
+
+
+def _temperature_color(temp_f: Optional[int]) -> tuple[int, int, int]:
+    if temp_f is None:
+        return (0, 0, 0)
+
+    # Classic cold->hot weather palette.
+    anchors = [
+        (-20, (49, 54, 149)),
+        (32, (66, 165, 245)),
+        (50, (38, 198, 218)),
+        (68, (102, 187, 106)),
+        (80, (255, 241, 118)),
+        (92, (255, 167, 38)),
+        (110, (229, 57, 53)),
+    ]
+
+    if temp_f <= anchors[0][0]:
+        return anchors[0][1]
+    if temp_f >= anchors[-1][0]:
+        return anchors[-1][1]
+
+    for (left_temp, left_color), (right_temp, right_color) in zip(anchors, anchors[1:]):
+        if left_temp <= temp_f <= right_temp:
+            span = right_temp - left_temp
+            ratio = 0.0 if span == 0 else (temp_f - left_temp) / span
+            return _lerp_color(left_color, right_color, ratio)
+
+    return anchors[-1][1]
+
+
+def _draw_weather_text(
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    event: Event,
+    font: ImageFont.FreeTypeFont,
+) -> None:
+    icon = event.weather_icon or ""
+    temp_text = event.weather_text or ""
+    if not icon and not temp_text:
+        return
+
+    if icon:
+        draw.text((x, y), icon, fill="black", font=font)
+        x += draw.textlength(icon, font=font)
+
+    if icon and temp_text:
+        spacer = " "
+        draw.text((x, y), spacer, fill="black", font=font)
+        x += draw.textlength(spacer, font=font)
+
+    if temp_text:
+        draw.text((x, y), temp_text, fill=_temperature_color(event.weather_temperature_f), font=font)
+
+
 def _wrap_text(
     draw: ImageDraw.ImageDraw,
     text: str,
@@ -148,7 +207,7 @@ def render_daily_schedule(
             if weather_text:
                 weather_w = d.textlength(weather_text, font=font_small)
                 x_weather = padding + max(0, time_col_w - weather_w)
-                d.text((x_weather, y + font_time.size + 4), weather_text, fill="black", font=font_small)
+                _draw_weather_text(d, x_weather, y + font_time.size + 4, e, font_small)
 
             divider_x = padding + time_col_w + (column_gap // 2)
             d.line((divider_x, y, divider_x, row_start_y + row_h), fill="black", width=1)
@@ -289,7 +348,7 @@ def render_daily_schedule(
                     d.text((padding + max(0, time_col_w - time_w), y), time_str, fill="black", font=time_font)
                     weather_text = _weather_label(e)
                     if weather_text:
-                        d.text((padding + time_col_w + gap, y), weather_text, fill="black", font=font_small)
+                        _draw_weather_text(d, padding + time_col_w + gap, y, e, font_small)
 
                     first_divider_x = padding + time_col_w + (gap // 2)
                     second_divider_x = padding + time_col_w + gap + weather_col_w + (gap // 2)

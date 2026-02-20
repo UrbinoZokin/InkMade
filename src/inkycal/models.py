@@ -14,3 +14,4 @@ class Event:
     travel_time_text: Optional[str] = None
     weather_icon: Optional[str] = None
     weather_text: Optional[str] = None
+    weather_temperature_f: Optional[int] = None

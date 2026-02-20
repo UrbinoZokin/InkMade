@@ -148,6 +148,7 @@ def _apply_weather_forecast(events: List[Event], timezone: str, latitude: float,
 
         weather_text = None
         weather_icon = None
+        weather_temperature_f = None
         try:
             weather = resolver.forecast_for_event_start(event.start)
         except Exception as e:
@@ -157,6 +158,7 @@ def _apply_weather_forecast(events: List[Event], timezone: str, latitude: float,
         if weather:
             weather_text = f"{weather.temperature_f}°F"
             weather_icon = weather.icon
+            weather_temperature_f = weather.temperature_f
 
         processed.append(
             Event(
@@ -169,6 +171,7 @@ def _apply_weather_forecast(events: List[Event], timezone: str, latitude: float,
                 travel_time_text=event.travel_time_text,
                 weather_icon=weather_icon,
                 weather_text=weather_text,
+                weather_temperature_f=weather_temperature_f,
             )
         )
     return processed
