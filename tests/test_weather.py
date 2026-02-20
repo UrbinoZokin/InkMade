@@ -38,6 +38,31 @@ def test_apply_weather_forecast_adds_icon_and_temperature(monkeypatch):
     assert processed[0].weather_text == "72°F"
 
 
+def test_apply_weather_forecast_adds_start_and_end_weather_for_long_events(monkeypatch):
+    tz = ZoneInfo("America/Phoenix")
+    event = Event(
+        source="google",
+        title="Long Planning Session",
+        start=datetime(2026, 2, 5, 9, 0, tzinfo=tz),
+        end=datetime(2026, 2, 5, 12, 0, tzinfo=tz),
+    )
+
+    class LongEventResolver(StubWeatherResolver):
+        def forecast_for_datetime(self, when):
+            if when.hour == 12:
+                return SimpleNamespace(temperature_f=68, icon="☁")
+            return SimpleNamespace(temperature_f=72, icon="☀")
+
+    monkeypatch.setattr("inkycal.main.WeatherForecastResolver", LongEventResolver)
+
+    processed = _apply_weather_forecast([event], "America/Phoenix", 33.4353, -112.3582)
+
+    assert processed[0].weather_icon == "☔"
+    assert processed[0].weather_text == "72°F"
+    assert processed[0].weather_end_icon == "☁"
+    assert processed[0].weather_end_text == "68°F"
+
+
 def test_events_signature_ignores_weather_fields():
     tz = ZoneInfo("America/Phoenix")
     event_base = Event(
