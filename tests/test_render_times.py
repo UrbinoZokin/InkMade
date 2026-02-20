@@ -176,3 +176,56 @@ def test_draws_dividers_for_today_and_tomorrow_timed_events(monkeypatch):
 
     vertical_lines = [line for line in observed_lines if line[0] == line[2] and line[1] != line[3]]
     assert len(vertical_lines) >= 3
+
+
+def test_today_separator_is_drawn_below_weather_text(monkeypatch):
+    tz = ZoneInfo("America/Phoenix")
+    event = Event(
+        source="google",
+        title="Quick Check-in",
+        start=datetime(2026, 2, 5, 6, 0, tzinfo=tz),
+        end=datetime(2026, 2, 5, 7, 0, tzinfo=tz),
+        weather_icon="☀",
+        weather_text="68°F",
+    )
+
+    observed_lines = []
+    observed_text_positions = {}
+
+    from PIL import ImageDraw
+
+    original_line = ImageDraw.ImageDraw.line
+    original_text = ImageDraw.ImageDraw.text
+
+    def recording_line(self, xy, *args, **kwargs):
+        observed_lines.append((xy, kwargs))
+        return original_line(self, xy, *args, **kwargs)
+
+    def recording_text(self, xy, text, *args, **kwargs):
+        observed_text_positions.setdefault(text, []).append((xy, kwargs.get("font")))
+        return original_text(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "line", recording_line)
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", recording_text)
+
+    render_daily_schedule(
+        canvas_w=800,
+        canvas_h=480,
+        now=datetime(2026, 2, 5, 0, 0, tzinfo=tz),
+        events=[event],
+        tz=tz,
+        show_sleep_banner=False,
+        sleep_banner_text="",
+    )
+
+    weather_temp_xy, weather_font = observed_text_positions["68°F"][0]
+    weather_bottom = weather_temp_xy[1] + weather_font.size
+
+    full_width_separators = [
+        xy
+        for xy, kwargs in observed_lines
+        if xy[1] == xy[3] and xy[0] == 40 and xy[2] == 760 and kwargs.get("width", 1) == 1
+    ]
+    first_separator_below_weather = min(y for _, y, _, _ in full_width_separators if y > weather_temp_xy[1])
+
+    assert first_separator_below_weather >= weather_bottom
