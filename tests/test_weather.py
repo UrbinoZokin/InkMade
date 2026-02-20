@@ -165,3 +165,32 @@ def test_long_events_weather_report_filters_and_prints(monkeypatch, capsys):
     assert "Standup" not in out
     assert "start weather: 70°F ☀" in out
     assert "end weather:   68°F ☁" in out
+
+
+def test_apply_weather_forecast_skips_end_weather_when_disabled(monkeypatch):
+    tz = ZoneInfo("America/Phoenix")
+    event = Event(
+        source="google",
+        title="Tomorrow Deep Work",
+        start=datetime(2026, 2, 6, 9, 0, tzinfo=tz),
+        end=datetime(2026, 2, 6, 12, 0, tzinfo=tz),
+    )
+
+    class LongEventResolver(StubWeatherResolver):
+        def forecast_for_datetime(self, when):
+            return SimpleNamespace(temperature_f=65, icon="☁")
+
+    monkeypatch.setattr("inkycal.main.WeatherForecastResolver", LongEventResolver)
+
+    processed = _apply_weather_forecast(
+        [event],
+        "America/Phoenix",
+        33.4353,
+        -112.3582,
+        include_end_weather_for_long_events=False,
+    )
+
+    assert processed[0].weather_icon == "☔"
+    assert processed[0].weather_text == "72°F"
+    assert processed[0].weather_end_icon is None
+    assert processed[0].weather_end_text is None
