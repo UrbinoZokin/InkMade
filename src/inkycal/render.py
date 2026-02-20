@@ -23,11 +23,8 @@ def _event_sort_key(e: Event):
     return (0 if e.all_day else 1, e.start, e.title.lower())
 
 
-def _title_with_weather(e: Event) -> str:
-    weather_parts = [part for part in [e.weather_icon, e.weather_text] if part]
-    if not weather_parts:
-        return e.title
-    return f"{' '.join(weather_parts)} {e.title}".strip()
+def _weather_label(e: Event) -> str:
+    return " ".join(part for part in [e.weather_icon, e.weather_text] if part).strip()
 
 
 def _wrap_text(
@@ -96,9 +93,11 @@ def render_daily_schedule(
     events_sorted = sorted(events, key=_event_sort_key)
 
     time_strings = [f"{_fmt_time(e.start)}–{_fmt_time(e.end)}" for e in events_sorted if not e.all_day]
+    weather_strings = [_weather_label(e) for e in events_sorted if not e.all_day and _weather_label(e)]
     max_time_w = max((d.textlength(s, font=font_time) for s in time_strings), default=0)
-    gap = int(font_time.size * 0.6)
-    time_col_w = max_time_w
+    max_weather_w = max((d.textlength(s, font=font_small) for s in weather_strings), default=0)
+    time_col_w = max(max_time_w, max_weather_w)
+    column_gap = 20
     title_line_h = font_title.size + 8
     min_row_h = 80
     banner_h = 70
@@ -123,10 +122,10 @@ def render_daily_schedule(
 
     for e in events_sorted:
         time_str = "" if e.all_day else f"{_fmt_time(e.start)}–{_fmt_time(e.end)}"
-        x_title = padding if e.all_day else padding + time_col_w + gap
+        x_title = padding if e.all_day else padding + time_col_w + column_gap
         max_width = (canvas_w - (2 * padding)) if e.all_day else (canvas_w - padding - x_title)
         max_lines = None if e.all_day else 2
-        lines = _wrap_text(d, _title_with_weather(e), font_title, max_width, max_lines=max_lines)
+        lines = _wrap_text(d, e.title, font_title, max_width, max_lines=max_lines)
 
         row_start_y = y
         content_y = row_start_y + title_line_h * len(lines) + 6
@@ -145,6 +144,14 @@ def render_daily_schedule(
             time_w = d.textlength(time_str, font=font_time)
             x_time = padding + max(0, time_col_w - time_w)
             d.text((x_time, y), time_str, fill="black", font=font_time)
+            weather_text = _weather_label(e)
+            if weather_text:
+                weather_w = d.textlength(weather_text, font=font_small)
+                x_weather = padding + max(0, time_col_w - weather_w)
+                d.text((x_weather, y + font_time.size + 4), weather_text, fill="black", font=font_small)
+
+            divider_x = padding + time_col_w + (column_gap // 2)
+            d.line((divider_x, y, divider_x, row_start_y + row_h), fill="black", width=1)
 
         for i, line in enumerate(lines):
             d.text((x_title, y + i * title_line_h), line, fill="black", font=font_title)
@@ -188,19 +195,21 @@ def render_daily_schedule(
                     for e in tomorrow_sorted
                     if not e.all_day
                 ]
+                profile_weather_strings = [_weather_label(e) for e in tomorrow_sorted if not e.all_day and _weather_label(e)]
                 profile_time_w = max(
                     (d.textlength(s, font=profile_time_font) for s in profile_time_strings),
                     default=0,
                 )
-                profile_gap = int(profile_time_font.size * 0.6)
+                profile_weather_w = max((d.textlength(s, font=font_small) for s in profile_weather_strings), default=0)
+                profile_gap = int(profile_time_font.size * 0.45)
                 profile_lines = [
                     _wrap_text(
                         d,
-                        _title_with_weather(e),
+                        e.title,
                         profile_title_font,
                         (canvas_w - (2 * padding))
                         if e.all_day
-                        else (canvas_w - padding - (padding + profile_time_w + profile_gap)),
+                        else (canvas_w - padding - (padding + profile_time_w + profile_weather_w + (profile_gap * 2))),
                         max_lines=None if e.all_day else 2,
                     )
                     for e in tomorrow_sorted
@@ -235,15 +244,17 @@ def render_daily_schedule(
                     (d.textlength(s, font=time_font) for s in chosen_time_strings),
                     default=0,
                 )
-                fallback_gap = int(time_font.size * 0.6)
+                fallback_weather_strings = [_weather_label(e) for e in tomorrow_sorted if not e.all_day and _weather_label(e)]
+                fallback_weather_w = max((d.textlength(s, font=font_small) for s in fallback_weather_strings), default=0)
+                fallback_gap = int(time_font.size * 0.45)
                 chosen_lines = [
                     _wrap_text(
                         d,
-                        _title_with_weather(e),
+                        e.title,
                         title_font,
                         (canvas_w - (2 * padding))
                         if e.all_day
-                        else (canvas_w - padding - (padding + fallback_time_w + fallback_gap)),
+                        else (canvas_w - padding - (padding + fallback_time_w + fallback_weather_w + (fallback_gap * 2))),
                         max_lines=None if e.all_day else 2,
                     )
                     for e in tomorrow_sorted
@@ -253,7 +264,11 @@ def render_daily_schedule(
                 (d.textlength(s, font=time_font) for s in chosen_time_strings),
                 default=0,
             )
-            gap = int(time_font.size * 0.6)
+            weather_col_w = max(
+                (d.textlength(_weather_label(e), font=font_small) for e in tomorrow_sorted if not e.all_day and _weather_label(e)),
+                default=0,
+            )
+            gap = int(time_font.size * 0.45)
 
             for e, lines in zip(tomorrow_sorted, chosen_lines):
                 time_str = "" if e.all_day else f"{_fmt_time(e.start)}–{_fmt_time(e.end)}"
@@ -270,9 +285,18 @@ def render_daily_schedule(
                     break
 
                 if time_str:
-                    d.text((padding, y), time_str, fill="black", font=time_font)
+                    time_w = d.textlength(time_str, font=time_font)
+                    d.text((padding + max(0, time_col_w - time_w), y), time_str, fill="black", font=time_font)
+                    weather_text = _weather_label(e)
+                    if weather_text:
+                        d.text((padding + time_col_w + gap, y), weather_text, fill="black", font=font_small)
 
-                x_title = padding if e.all_day else padding + time_col_w + gap
+                    first_divider_x = padding + time_col_w + (gap // 2)
+                    second_divider_x = padding + time_col_w + gap + weather_col_w + (gap // 2)
+                    d.line((first_divider_x, y, first_divider_x, row_start_y + row_h), fill="black", width=1)
+                    d.line((second_divider_x, y, second_divider_x, row_start_y + row_h), fill="black", width=1)
+
+                x_title = padding if e.all_day else padding + time_col_w + weather_col_w + (gap * 2)
                 for i, line in enumerate(lines):
                     d.text(
                         (x_title, y + i * chosen_profile["title_line_h"]),
