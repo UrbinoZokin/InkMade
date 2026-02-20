@@ -184,6 +184,60 @@ def _process_events(events: List[Event], travel_enabled: bool, origin_address: s
     return processed
 
 
+def _fetch_events_for_range(cfg, range_start: datetime, range_end: datetime, tz: ZoneInfo) -> List[Event]:
+    events: List[Event] = []
+    if cfg.google.enabled:
+        creds_path = os.environ.get("GOOGLE_CREDENTIALS_JSON", "")
+        token_path = os.environ.get("GOOGLE_TOKEN_JSON", "")
+        if creds_path and token_path:
+            events.extend(fetch_google_events(cfg.google.calendar_ids, range_start, range_end, tz, creds_path, token_path))
+
+    if cfg.icloud.enabled:
+        try:
+            user = os.environ.get("ICLOUD_USERNAME", "")
+            pw = os.environ.get("ICLOUD_APP_PASSWORD", "")
+            if user and pw:
+                events.extend(fetch_icloud_events(range_start, range_end, tz, user, pw, cfg.icloud.calendar_name_allowlist))
+            else:
+                print("iCloud enabled but ICLOUD_USERNAME/ICLOUD_APP_PASSWORD not set; skipping iCloud.")
+        except Exception as e:
+            print(f"iCloud fetch failed; continuing without iCloud. Error: {e}")
+
+    return _process_events(
+        events,
+        travel_enabled=cfg.travel.enabled,
+        origin_address=cfg.travel.origin_address,
+        back_to_back_window_minutes=cfg.travel.back_to_back_window_minutes,
+    )
+
+
+def print_long_events_weather_report(config_path: str = CONFIG_PATH_DEFAULT) -> None:
+    load_dotenv()
+    cfg = load_config(config_path)
+    tz = ZoneInfo(cfg.timezone)
+    now = datetime.now(tz=tz)
+    day_start, day_end = _today_range(now, tz)
+    events = _fetch_events_for_range(cfg, day_start, day_end, tz)
+    resolver = WeatherForecastResolver(timezone=cfg.timezone, latitude=cfg.weather.latitude, longitude=cfg.weather.longitude)
+
+    filtered = [
+        e for e in events if (not e.all_day) and ((e.end - e.start) > timedelta(minutes=60))
+    ]
+
+    if not filtered:
+        print("No timed events longer than 60 minutes found for today.")
+        return
+
+    for event in filtered:
+        start_weather = resolver.forecast_for_datetime(event.start)
+        end_weather = resolver.forecast_for_datetime(event.end)
+        start_text = "unavailable" if not start_weather else f"{start_weather.temperature_f}°F {start_weather.icon}"
+        end_text = "unavailable" if not end_weather else f"{end_weather.temperature_f}°F {end_weather.icon}"
+        print(f"- {event.start.strftime('%H:%M')}-{event.end.strftime('%H:%M')} {event.title}")
+        print(f"  start weather: {start_text}")
+        print(f"  end weather:   {end_text}")
+
+
 def _should_force_hourly_refresh(state: State, now: datetime, threshold: timedelta) -> bool:
     if not state.last_rendered_iso:
         return False
@@ -271,54 +325,8 @@ def run_once(
     day_start, day_end = _today_range(now, tz)
     tomorrow_start = day_start + timedelta(days=1)
     tomorrow_end = day_end + timedelta(days=1)
-    events: List[Event] = []
-    tomorrow_events: List[Event] = []
-    if cfg.google.enabled:
-        creds_path = os.environ.get("GOOGLE_CREDENTIALS_JSON", "")
-        token_path = os.environ.get("GOOGLE_TOKEN_JSON", "")
-        if creds_path and token_path:
-            events.extend(
-                fetch_google_events(cfg.google.calendar_ids, day_start, day_end, tz, creds_path, token_path)
-            )
-            tomorrow_events.extend(
-                fetch_google_events(cfg.google.calendar_ids, tomorrow_start, tomorrow_end, tz, creds_path, token_path)
-            )
-
-    if cfg.icloud.enabled:
-        try:
-            user = os.environ.get("ICLOUD_USERNAME", "")
-            pw = os.environ.get("ICLOUD_APP_PASSWORD", "")
-            if user and pw:
-                events.extend(
-                    fetch_icloud_events(day_start, day_end, tz, user, pw, cfg.icloud.calendar_name_allowlist)
-                )
-                tomorrow_events.extend(
-                    fetch_icloud_events(
-                        tomorrow_start,
-                        tomorrow_end,
-                        tz,
-                        user,
-                        pw,
-                        cfg.icloud.calendar_name_allowlist,
-                    )
-                )
-            else:
-                print("iCloud enabled but ICLOUD_USERNAME/ICLOUD_APP_PASSWORD not set; skipping iCloud.")
-        except Exception as e:
-            print(f"iCloud fetch failed; continuing without iCloud. Error: {e}")
-
-    events = _process_events(
-        events,
-        travel_enabled=cfg.travel.enabled,
-        origin_address=cfg.travel.origin_address,
-        back_to_back_window_minutes=cfg.travel.back_to_back_window_minutes,
-    )
-    tomorrow_events = _process_events(
-        tomorrow_events,
-        travel_enabled=cfg.travel.enabled,
-        origin_address=cfg.travel.origin_address,
-        back_to_back_window_minutes=cfg.travel.back_to_back_window_minutes,
-    )
+    events = _fetch_events_for_range(cfg, day_start, day_end, tz)
+    tomorrow_events = _fetch_events_for_range(cfg, tomorrow_start, tomorrow_end, tz)
 
     # Render signature includes whether we show the sleep banner
     header_date = now.strftime("%A, %B %-d, %Y")
@@ -384,7 +392,12 @@ def main():
     ap.add_argument("--state", default=STATE_PATH_DEFAULT)
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--deep-clean", action="store_true")
+    ap.add_argument("--long-events-weather-report", action="store_true")
     args = ap.parse_args()
+
+    if args.long_events_weather_report:
+        print_long_events_weather_report(config_path=args.config)
+        return
 
     run_once(config_path=args.config, state_path=args.state, force=args.force, deep_clean=args.deep_clean)
 
