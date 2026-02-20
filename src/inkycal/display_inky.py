@@ -12,6 +12,9 @@ def show_on_inky(img: Image.Image, rotate_degrees: int = 0, border: str = "white
     if disp is None:
         raise RuntimeError("Could not auto-detect Inky display. Check wiring and SPI enabled.")
 
+    if img.mode != "P":
+        img = img.convert("P")
+
     if rotate_degrees:
         img = img.rotate(rotate_degrees, expand=True)
 

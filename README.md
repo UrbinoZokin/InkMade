@@ -4,6 +4,12 @@ Daily calendar display for Raspberry Pi Zero 2 W + Inky Impressions 13.3" E-Ink
 
 Displays today’s merged Google + iCloud calendar schedule in portrait mode.
 
+Quick weather report for long events:
+
+```bash
+PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather-report
+```
+
 ### Features
 
 - Google Calendar + Apple iCloud (CalDAV) sync  
@@ -20,5 +26,10 @@ Displays today’s merged Google + iCloud calendar schedule in portrait mode.
 
 # 🚀 Quick Install (one command)
 
-curl -fsSL https://raw.githubusercontent.com/UrbinoZokin/InkMade/main/scripts/bootstrap.sh | \
+curl -fsSL https://raw.githubusercontent.com/UrbinoZokin/InkMade/Calendar_debugging/scripts/bootstrap.sh | \
 REPO_URL="https://github.com/UrbinoZokin/InkMade.git" bash
+
+cd /opt/inkycal \
+git fetch origin \
+git reset --hard origin/Calendar_debugging \
+chmod +x /opt/inkycal/scripts/update.sh

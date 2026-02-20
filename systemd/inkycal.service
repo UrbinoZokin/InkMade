@@ -5,7 +5,13 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-EnvironmentFile=/opt/inkycal/.env
+#EnvironmentFile=/opt/inkycal/.env
+ExecStartPre=/bin/sleep 45
 ExecStart=/opt/inkycal/scripts/update.sh
 User=pi
 Group=pi
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

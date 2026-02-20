@@ -36,6 +36,17 @@ class ICloudConfig:
     calendar_name_allowlist: List[str]
 
 @dataclass
+class TravelConfig:
+    enabled: bool
+    origin_address: str
+    back_to_back_window_minutes: int
+
+@dataclass
+class WeatherConfig:
+    latitude: float
+    longitude: float
+
+@dataclass
 class AppConfig:
     timezone: str
     poll_interval_minutes: int
@@ -44,6 +55,8 @@ class AppConfig:
     display: DisplayConfig
     google: GoogleConfig
     icloud: ICloudConfig
+    travel: TravelConfig
+    weather: WeatherConfig
 
 def load_config(path: str) -> AppConfig:
     p = Path(path)
@@ -53,6 +66,8 @@ def load_config(path: str) -> AppConfig:
     deep_clean = data.get("deep_clean", {})
     display = data.get("display", {})
     calendars = data.get("calendars", {})
+    travel = data.get("travel", {})
+    weather = data.get("weather", {})
 
     google = calendars.get("google", {})
     icloud = calendars.get("icloud", {})
@@ -85,5 +100,14 @@ def load_config(path: str) -> AppConfig:
         icloud=ICloudConfig(
             enabled=bool(icloud.get("enabled", True)),
             calendar_name_allowlist=list(icloud.get("calendar_name_allowlist", [])),
+        ),
+        travel=TravelConfig(
+            enabled=bool(travel.get("enabled", False)),
+            origin_address=str(travel.get("origin_address", "")).strip(),
+            back_to_back_window_minutes=int(travel.get("back_to_back_window_minutes", 30)),
+        ),
+        weather=WeatherConfig(
+            latitude=float(weather.get("latitude", 33.4353)),
+            longitude=float(weather.get("longitude", -112.3582)),
         ),
     )

@@ -86,6 +86,7 @@ echo "-- Installing systemd unit files..."
 sudo cp "$APP_DIR/systemd/"*.service "$APP_DIR/systemd/"*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 
+sudo chmod +x /opt/inkycal/scripts/update.sh
 
 # Sanity checks
 echo

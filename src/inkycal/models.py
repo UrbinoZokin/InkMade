@@ -11,3 +11,10 @@ class Event:
     end: datetime               # timezone-aware
     all_day: bool = False
     location: Optional[str] = None
+    travel_time_text: Optional[str] = None
+    weather_icon: Optional[str] = None
+    weather_text: Optional[str] = None
+    weather_temperature_f: Optional[int] = None
+    weather_end_icon: Optional[str] = None
+    weather_end_text: Optional[str] = None
+    weather_end_temperature_f: Optional[int] = None
