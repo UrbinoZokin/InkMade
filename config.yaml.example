@@ -35,3 +35,7 @@ travel:
   enabled: false
   origin_address: "123 Main St, Springfield, IL"
   back_to_back_window_minutes: 30
+
+weather:
+  latitude: 33.4353   # Goodyear, AZ (default)
+  longitude: -112.3582

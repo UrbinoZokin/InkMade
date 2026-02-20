@@ -75,3 +75,39 @@ def test_all_day_summary_uses_full_width_and_ignores_time_column(monkeypatch):
     )
 
     assert observed_positions["All-day: Offsite"][0][0] == 40
+
+
+def test_weather_prefix_is_drawn_with_event_title(monkeypatch):
+    tz = ZoneInfo("America/Phoenix")
+    event = Event(
+        source="google",
+        title="Morning Run",
+        start=datetime(2026, 2, 5, 6, 0, tzinfo=tz),
+        end=datetime(2026, 2, 5, 7, 0, tzinfo=tz),
+        weather_icon="☀",
+        weather_text="68°F",
+    )
+
+    observed_text = []
+
+    from PIL import ImageDraw
+
+    original_text = ImageDraw.ImageDraw.text
+
+    def recording_text(self, xy, text, *args, **kwargs):
+        observed_text.append(text)
+        return original_text(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", recording_text)
+
+    render_daily_schedule(
+        canvas_w=800,
+        canvas_h=480,
+        now=datetime(2026, 2, 5, 0, 0, tzinfo=tz),
+        events=[event],
+        tz=tz,
+        show_sleep_banner=False,
+        sleep_banner_text="",
+    )
+
+    assert any("☀" in text and "68°F" in text for text in observed_text)

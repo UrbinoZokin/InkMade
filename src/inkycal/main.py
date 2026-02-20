@@ -16,6 +16,7 @@ from .display_inky import show_on_inky
 from .models import Event
 from .network import get_ups_status, get_wifi_status
 from .render import render_daily_schedule
+from .weather import WeatherForecastResolver
 from .state import State, load_state, save_state
 from .travel import TravelTimeResolver
 
@@ -134,6 +135,43 @@ def _apply_travel_times(events: List[Event], origin_address: str, back_to_back_w
 
     return processed
 
+
+
+
+def _apply_weather_forecast(events: List[Event], timezone: str, latitude: float, longitude: float) -> List[Event]:
+    resolver = WeatherForecastResolver(timezone=timezone, latitude=latitude, longitude=longitude)
+    processed: List[Event] = []
+    for event in events:
+        if event.all_day:
+            processed.append(event)
+            continue
+
+        weather_text = None
+        weather_icon = None
+        try:
+            weather = resolver.forecast_for_event_start(event.start)
+        except Exception as e:
+            print(f"Weather lookup failed for '{event.title}'; continuing without weather. Error: {e}")
+            weather = None
+
+        if weather:
+            weather_text = f"{weather.temperature_f}°F"
+            weather_icon = weather.icon
+
+        processed.append(
+            Event(
+                source=event.source,
+                title=event.title,
+                start=event.start,
+                end=event.end,
+                all_day=event.all_day,
+                location=event.location,
+                travel_time_text=event.travel_time_text,
+                weather_icon=weather_icon,
+                weather_text=weather_text,
+            )
+        )
+    return processed
 
 def _process_events(events: List[Event], travel_enabled: bool, origin_address: str, back_to_back_window_minutes: int) -> List[Event]:
     processed = _dedupe_events(events)
@@ -300,17 +338,30 @@ def run_once(
         print("No schedule change; skipping display refresh")
         return
 
+    events_with_weather = _apply_weather_forecast(
+        events,
+        cfg.timezone,
+        cfg.weather.latitude,
+        cfg.weather.longitude,
+    )
+    tomorrow_events_with_weather = _apply_weather_forecast(
+        tomorrow_events,
+        cfg.timezone,
+        cfg.weather.latitude,
+        cfg.weather.longitude,
+    )
+
     img = render_daily_schedule(
         canvas_w=cfg.display.width,
         canvas_h=cfg.display.height,
         now=now,
-        events=events,
+        events=events_with_weather,
         tz=tz,
         show_sleep_banner=show_banner,
         sleep_banner_text=cfg.sleep.banner_text,
         wifi_status=wifi_status,
         ups_status=ups_status,
-        tomorrow_events=tomorrow_events,
+        tomorrow_events=tomorrow_events_with_weather,
     )
 
     show_on_inky(img, rotate_degrees=cfg.display.rotate_degrees, border=cfg.display.border)
