@@ -113,7 +113,7 @@ def test_weather_is_drawn_in_time_weather_column_for_today(monkeypatch):
 
     render_daily_schedule(
         canvas_w=800,
-        canvas_h=480,
+        canvas_h=800,
         now=datetime(2026, 2, 5, 0, 0, tzinfo=tz),
         events=[early, later],
         tz=tz,
@@ -270,3 +270,89 @@ def test_long_event_weather_temperatures_use_temperature_colors(monkeypatch):
 
     assert observed_fills["68°F"][0] != "black"
     assert observed_fills["92°F"][0] != "black"
+
+
+def test_overflow_mode_hides_finished_events_and_shows_overflow_notice(monkeypatch):
+    tz = ZoneInfo("America/Phoenix")
+    now = datetime(2026, 2, 5, 12, 0, tzinfo=tz)
+    events = [
+        Event(
+            source="google",
+            title=f"Event {idx}",
+            start=datetime(2026, 2, 5, idx, 0, tzinfo=tz),
+            end=datetime(2026, 2, 5, idx, 45, tzinfo=tz),
+        )
+        for idx in range(8, 16)
+    ]
+
+    observed_text = []
+
+    from PIL import ImageDraw
+
+    original_text = ImageDraw.ImageDraw.text
+
+    def recording_text(self, xy, text, *args, **kwargs):
+        observed_text.append(text)
+        return original_text(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", recording_text)
+
+    render_daily_schedule(
+        canvas_w=800,
+        canvas_h=480,
+        now=now,
+        events=events,
+        tz=tz,
+        show_sleep_banner=False,
+        sleep_banner_text="",
+    )
+
+    assert "Event 8" not in observed_text
+    assert "Event 9" not in observed_text
+    assert "Event 10" not in observed_text
+    assert any(text.startswith("Plus ") and text.endswith(" more events") for text in observed_text)
+
+
+def test_no_overflow_mode_keeps_finished_events_visible(monkeypatch):
+    tz = ZoneInfo("America/Phoenix")
+    now = datetime(2026, 2, 5, 12, 0, tzinfo=tz)
+    events = [
+        Event(
+            source="google",
+            title="Morning Sync",
+            start=datetime(2026, 2, 5, 9, 0, tzinfo=tz),
+            end=datetime(2026, 2, 5, 9, 30, tzinfo=tz),
+        ),
+        Event(
+            source="google",
+            title="Afternoon Review",
+            start=datetime(2026, 2, 5, 13, 0, tzinfo=tz),
+            end=datetime(2026, 2, 5, 14, 0, tzinfo=tz),
+        ),
+    ]
+
+    observed_text = []
+
+    from PIL import ImageDraw
+
+    original_text = ImageDraw.ImageDraw.text
+
+    def recording_text(self, xy, text, *args, **kwargs):
+        observed_text.append(text)
+        return original_text(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", recording_text)
+
+    render_daily_schedule(
+        canvas_w=800,
+        canvas_h=900,
+        now=now,
+        events=events,
+        tz=tz,
+        show_sleep_banner=False,
+        sleep_banner_text="",
+    )
+
+    assert "Morning" in observed_text
+    assert "Sync" in observed_text
+    assert not any(text.startswith("Plus ") and text.endswith(" more events") for text in observed_text)
