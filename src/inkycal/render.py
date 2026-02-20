@@ -180,7 +180,7 @@ def render_daily_schedule(
             updated_block_h += ups_text_h + 8
     max_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - updated_block_h
 
-    for e in events_sorted:
+    for idx, e in enumerate(events_sorted):
         time_str = "" if e.all_day else f"{_fmt_time(e.start)}–{_fmt_time(e.end)}"
         x_title = padding if e.all_day else padding + time_col_w + column_gap
         max_width = (canvas_w - (2 * padding)) if e.all_day else (canvas_w - padding - x_title)
@@ -230,7 +230,12 @@ def render_daily_schedule(
         y = row_start_y + row_h
 
         # subtle separator
-        d.line((padding, y, canvas_w - padding, y), fill="black", width=1)
+        is_last_today_event = idx == len(events_sorted) - 1
+        if is_last_today_event and tomorrow_events:
+            d.line((padding, y, canvas_w - padding, y), fill="black", width=2)
+            d.line((padding, y + 6, canvas_w - padding, y + 6), fill="black", width=2)
+        else:
+            d.line((padding, y, canvas_w - padding, y), fill="black", width=1)
         y += 18
     if tomorrow_events:
         tomorrow_sorted = sorted(tomorrow_events, key=_event_sort_key)
