@@ -148,6 +148,49 @@ def _wrap_text(
         lines.append(cur)
     return lines if max_lines is None else lines[:max_lines]
 
+
+def _today_event_layout(
+    draw: ImageDraw.ImageDraw,
+    event: Event,
+    canvas_w: int,
+    padding: int,
+    time_col_w: float,
+    column_gap: int,
+    font_time: ImageFont.FreeTypeFont,
+    font_title: ImageFont.FreeTypeFont,
+    font_small: ImageFont.FreeTypeFont,
+    font_today_weather: ImageFont.FreeTypeFont,
+    title_line_h: int,
+    min_row_h: int,
+) -> dict:
+    time_str = "" if event.all_day else f"{_fmt_time(event.start)}–{_fmt_time(event.end)}"
+    x_title = padding if event.all_day else padding + time_col_w + column_gap
+    max_width = (canvas_w - (2 * padding)) if event.all_day else (canvas_w - padding - x_title)
+    max_lines = None if event.all_day else 2
+    lines = _wrap_text(draw, event.title, font_title, max_width, max_lines=max_lines)
+
+    content_h = title_line_h * len(lines) + 6
+    detail_text = (event.travel_time_text or "").strip()
+    if detail_text:
+        content_h += font_small.size + 8
+
+    left_col_h = 0
+    if time_str:
+        left_col_h = font_time.size
+        if _weather_label(event):
+            left_col_h += 4 + font_today_weather.size
+
+    row_h = max(min_row_h, content_h + 8, left_col_h + 8)
+    return {
+        "event": event,
+        "time_str": time_str,
+        "x_title": x_title,
+        "lines": lines,
+        "detail_text": detail_text,
+        "row_h": row_h,
+        "total_row_h": row_h + 18,
+    }
+
 def render_daily_schedule(
     canvas_w: int,
     canvas_h: int,
@@ -220,29 +263,58 @@ def render_daily_schedule(
             updated_block_h += ups_text_h + 8
     max_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - updated_block_h
 
-    for idx, e in enumerate(events_sorted):
-        time_str = "" if e.all_day else f"{_fmt_time(e.start)}–{_fmt_time(e.end)}"
-        x_title = padding if e.all_day else padding + time_col_w + column_gap
-        max_width = (canvas_w - (2 * padding)) if e.all_day else (canvas_w - padding - x_title)
-        max_lines = None if e.all_day else 2
-        lines = _wrap_text(d, e.title, font_title, max_width, max_lines=max_lines)
+    today_layouts = [
+        _today_event_layout(
+            d,
+            e,
+            canvas_w,
+            padding,
+            time_col_w,
+            column_gap,
+            font_time,
+            font_title,
+            font_small,
+            font_today_weather,
+            title_line_h,
+            min_row_h,
+        )
+        for e in events_sorted
+    ]
+    overflow_mode = y + sum(layout["total_row_h"] for layout in today_layouts) > max_y
+
+    if overflow_mode:
+        now_local = now.astimezone(tz)
+        pending_layouts = [
+            layout for layout in today_layouts if layout["event"].all_day or layout["event"].end > now_local
+        ]
+        overflow_notice_h = font_small.size + 16
+        visible_layouts = []
+        test_y = y
+        for idx, layout in enumerate(pending_layouts):
+            has_more_hidden = idx < len(pending_layouts) - 1
+            reserve_notice = overflow_notice_h if has_more_hidden else 0
+            if test_y + layout["total_row_h"] + reserve_notice > max_y:
+                break
+            visible_layouts.append(layout)
+            test_y += layout["total_row_h"]
+
+        hidden_count = len(pending_layouts) - len(visible_layouts)
+    else:
+        visible_layouts = today_layouts
+        hidden_count = 0
+
+    for idx, layout in enumerate(visible_layouts):
+        e = layout["event"]
+        time_str = layout["time_str"]
+        x_title = layout["x_title"]
+        lines = layout["lines"]
+        detail_text = layout["detail_text"]
+        row_h = layout["row_h"]
 
         row_start_y = y
         content_y = row_start_y + title_line_h * len(lines) + 6
-        detail_text = (e.travel_time_text or "").strip()
-        if detail_text:
-            content_y += font_small.size + 8
 
-        left_col_bottom = row_start_y
-        if time_str:
-            left_col_bottom = row_start_y + font_time.size
-            if _weather_label(e):
-                left_col_bottom = row_start_y + font_time.size + 4 + font_today_weather.size
-
-        row_h = max(min_row_h, content_y - row_start_y + 8, left_col_bottom - row_start_y + 8)
-        total_row_h = row_h + 18
-
-        if y + total_row_h > max_y:
+        if not overflow_mode and y + layout["total_row_h"] > max_y:
             d.text((padding, y), "…", fill="black", font=font_header)
             break
 
@@ -270,13 +342,17 @@ def render_daily_schedule(
         y = row_start_y + row_h
 
         # subtle separator
-        is_last_today_event = idx == len(events_sorted) - 1
+        is_last_today_event = idx == len(visible_layouts) - 1 and hidden_count == 0
         if is_last_today_event and tomorrow_events:
             d.line((padding, y, canvas_w - padding, y), fill="black", width=2)
             d.line((padding, y + 6, canvas_w - padding, y + 6), fill="black", width=2)
         else:
             d.line((padding, y, canvas_w - padding, y), fill="black", width=1)
         y += 18
+
+    if overflow_mode and hidden_count > 0 and y + font_small.size + 6 <= max_y:
+        d.text((padding, y), f"Plus {hidden_count} more events", fill="black", font=font_small)
+        y += font_small.size + 8
     if tomorrow_events:
         tomorrow_sorted = sorted(tomorrow_events, key=_event_sort_key)
         header_gap = 10
