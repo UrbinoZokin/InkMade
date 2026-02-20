@@ -3,15 +3,20 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 
 @dataclass(frozen=True)
 class WeatherAtTime:
     temperature_f: int
     icon: str
+
+
+@dataclass(frozen=True)
+class WeatherAlert:
+    headline: str
 
 
 def _weather_icon(weather_code: int) -> str:
@@ -84,3 +89,33 @@ class WeatherForecastResolver:
 
     def forecast_for_event_start(self, event_start: datetime) -> Optional[WeatherAtTime]:
         return self.forecast_for_datetime(event_start)
+
+    def active_alerts(self, limit: int = 2) -> List[WeatherAlert]:
+        params = urlencode({"point": f"{self.latitude},{self.longitude}"})
+        req = Request(
+            f"https://api.weather.gov/alerts/active?{params}",
+            headers={"User-Agent": "inkycal/1.0 (contact: local)"},
+        )
+        with urlopen(req, timeout=8) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+
+        features = payload.get("features", [])
+        alerts: List[WeatherAlert] = []
+        seen_headlines = set()
+        for feature in features:
+            properties = feature.get("properties", {})
+            headline = str(properties.get("headline") or "").strip()
+            if not headline:
+                event = str(properties.get("event") or "").strip()
+                severity = str(properties.get("severity") or "").strip()
+                if event and severity:
+                    headline = f"{severity}: {event}"
+                else:
+                    headline = event
+            if not headline or headline in seen_headlines:
+                continue
+            alerts.append(WeatherAlert(headline=headline))
+            seen_headlines.add(headline)
+            if len(alerts) >= limit:
+                break
+        return alerts

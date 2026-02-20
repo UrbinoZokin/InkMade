@@ -1,11 +1,11 @@
 from __future__ import annotations
-from dataclasses import asdict
 from datetime import datetime
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 from PIL import Image, ImageDraw, ImageFont
 
 from .models import Event
+from .weather import WeatherAlert
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont:
     # DejaVu is commonly available on Raspberry Pi; install via apt in scripts/install.sh
@@ -191,6 +191,22 @@ def _today_event_layout(
         "total_row_h": row_h + 18,
     }
 
+
+def _prepare_weather_alert_lines(
+    draw: ImageDraw.ImageDraw,
+    alerts: List[WeatherAlert],
+    font: ImageFont.FreeTypeFont,
+    max_width: float,
+) -> List[str]:
+    if not alerts:
+        return []
+
+    lines: List[str] = []
+    for alert in alerts:
+        wrapped = _wrap_text(draw, f"• {alert.headline}", font, max_width, max_lines=2)
+        lines.extend(wrapped)
+    return lines
+
 def render_daily_schedule(
     canvas_w: int,
     canvas_h: int,
@@ -202,6 +218,7 @@ def render_daily_schedule(
     wifi_status: str = "connected",
     ups_status: Optional[dict] = None,
     tomorrow_events: Optional[List[Event]] = None,
+    weather_alerts: Optional[List[WeatherAlert]] = None,
 ) -> Image.Image:
     img = Image.new("RGB", (canvas_w, canvas_h), "white")
     d = ImageDraw.Draw(img)
@@ -211,6 +228,7 @@ def render_daily_schedule(
     font_time = _load_font(46)
     font_title = _load_font(52)
     font_small = _load_font(30)
+    font_alert_header = _load_font(34)
     font_today_weather = _load_font(38)
 
     padding = 40
@@ -261,7 +279,20 @@ def render_daily_schedule(
         if ups_right - ups_text_w < min_ups_x:
             ups_on_second_line = True
             updated_block_h += ups_text_h + 8
-    max_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - updated_block_h
+
+    weather_alert_lines = _prepare_weather_alert_lines(
+        d,
+        weather_alerts or [],
+        font_small,
+        canvas_w - (2 * padding),
+    )
+    weather_alert_line_h = font_small.size + 4
+    weather_alert_header_h = font_alert_header.size + 6
+    weather_alert_block_h = 0
+    if weather_alert_lines:
+        weather_alert_block_h = weather_alert_header_h + (len(weather_alert_lines) * weather_alert_line_h) + 24
+
+    max_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - updated_block_h - weather_alert_block_h
 
     today_layouts = [
         _today_event_layout(
@@ -505,6 +536,20 @@ def render_daily_schedule(
                 d.line((padding, y, canvas_w - padding, y), fill="black", width=1)
                 y += chosen_profile["sep"]
     bottom_y = canvas_h - padding - (banner_h if show_sleep_banner else 0)
+    alert_bottom_y = bottom_y - updated_block_h
+    if weather_alert_lines:
+        alert_top = alert_bottom_y - weather_alert_block_h
+        alert_bottom = alert_bottom_y - 6
+        d.rectangle((padding, alert_top, canvas_w - padding, alert_bottom), outline="red", width=3)
+        alert_header_y = alert_top + 8
+        d.text((padding + 12, alert_header_y), "NATIONAL WEATHER SERVICE ALERT", fill="red", font=font_alert_header)
+
+        line_start_y = alert_header_y + weather_alert_header_h
+        d.line((padding + 10, line_start_y - 4, canvas_w - padding - 10, line_start_y - 4), fill="red", width=2)
+        for line in weather_alert_lines:
+            d.text((padding + 12, line_start_y), line, fill="black", font=font_small)
+            line_start_y += weather_alert_line_h
+
     updated_y = bottom_y - updated_text_h
     if ups_text:
         ups_text_w = d.textlength(ups_text, font=font_small)
