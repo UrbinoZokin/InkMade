@@ -192,7 +192,14 @@ def render_daily_schedule(
         detail_text = (e.travel_time_text or "").strip()
         if detail_text:
             content_y += font_small.size + 8
-        row_h = max(min_row_h, content_y - row_start_y + 8)
+
+        left_col_bottom = row_start_y
+        if time_str:
+            left_col_bottom = row_start_y + font_time.size
+            if _weather_label(e):
+                left_col_bottom = row_start_y + font_time.size + 4 + font_today_weather.size
+
+        row_h = max(min_row_h, content_y - row_start_y + 8, left_col_bottom - row_start_y + 8)
         total_row_h = row_h + 18
 
         if y + total_row_h > max_y:
