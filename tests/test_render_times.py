@@ -79,7 +79,7 @@ def test_all_day_summary_uses_full_width_and_ignores_time_column(monkeypatch):
 
 def test_weather_is_drawn_in_time_weather_column_for_today(monkeypatch):
     tz = ZoneInfo("America/Phoenix")
-    event = Event(
+    early = Event(
         source="google",
         title="Morning Run",
         start=datetime(2026, 2, 5, 6, 0, tzinfo=tz),
@@ -87,32 +87,49 @@ def test_weather_is_drawn_in_time_weather_column_for_today(monkeypatch):
         weather_icon="☀",
         weather_text="68°F",
     )
+    later = Event(
+        source="google",
+        title="Commute",
+        start=datetime(2026, 2, 5, 9, 0, tzinfo=tz),
+        end=datetime(2026, 2, 5, 10, 0, tzinfo=tz),
+        weather_icon="🌧",
+        weather_text="102°F",
+    )
 
-    observed_text = []
+    observed_calls = []
 
     from PIL import ImageDraw
 
     original_text = ImageDraw.ImageDraw.text
+    def fixed_textlength(self, text, font=None, *args, **kwargs):
+        return float(len(text) * 10)
 
     def recording_text(self, xy, text, *args, **kwargs):
-        observed_text.append(text)
+        observed_calls.append((xy, text, kwargs.get("font")))
         return original_text(self, xy, text, *args, **kwargs)
 
+    monkeypatch.setattr(ImageDraw.ImageDraw, "textlength", fixed_textlength)
     monkeypatch.setattr(ImageDraw.ImageDraw, "text", recording_text)
 
     render_daily_schedule(
         canvas_w=800,
         canvas_h=480,
         now=datetime(2026, 2, 5, 0, 0, tzinfo=tz),
-        events=[event],
+        events=[early, later],
         tz=tz,
         show_sleep_banner=False,
         sleep_banner_text="",
     )
 
-    assert "☀ 68°F" in observed_text
-    assert any("Morning" in text for text in observed_text)
-    assert not any("☀" in text and "Morning Run" in text for text in observed_text)
+    weather_icon_call = next(call for call in observed_calls if call[1] == "☀")
+    weather_temp_call = next(call for call in observed_calls if call[1] == "68°F")
+    assert weather_icon_call[2].size == 38
+    assert weather_temp_call[2].size == 38
+
+    # with mocked text lengths, first event weather width is 6 chars = 60 px,
+    # and time/weather column width is 160 px from the longest time range text.
+    centered_weather_x = 40 + ((160 - 60) / 2)
+    assert weather_icon_call[0][0] == centered_weather_x
 
 
 def test_draws_dividers_for_today_and_tomorrow_timed_events(monkeypatch):
