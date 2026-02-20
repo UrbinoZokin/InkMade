@@ -24,7 +24,11 @@ def _event_sort_key(e: Event):
 
 
 def _weather_label(e: Event) -> str:
-    return " ".join(part for part in [e.weather_icon, e.weather_text] if part).strip()
+    start_label = " ".join(part for part in [e.weather_icon, e.weather_text] if part).strip()
+    end_label = " ".join(part for part in [e.weather_end_icon, e.weather_end_text] if part).strip()
+    if start_label and end_label:
+        return f"{start_label} → {end_label}"
+    return start_label or end_label
 
 
 
@@ -71,6 +75,10 @@ def _draw_weather_text(
     icon = event.weather_icon or ""
     temp_text = event.weather_text or ""
     if not icon and not temp_text:
+        return
+
+    if event.weather_end_icon or event.weather_end_text:
+        draw.text((x, y), _weather_label(event), fill="black", font=font)
         return
 
     if icon:

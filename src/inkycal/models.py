@@ -15,3 +15,6 @@ class Event:
     weather_icon: Optional[str] = None
     weather_text: Optional[str] = None
     weather_temperature_f: Optional[int] = None
+    weather_end_icon: Optional[str] = None
+    weather_end_text: Optional[str] = None
+    weather_end_temperature_f: Optional[int] = None
