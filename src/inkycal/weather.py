@@ -43,8 +43,8 @@ class WeatherForecastResolver:
         self.latitude = latitude
         self.longitude = longitude
 
-    def forecast_for_event_start(self, event_start: datetime) -> Optional[WeatherAtTime]:
-        if event_start.tzinfo is None:
+    def forecast_for_datetime(self, forecast_time: datetime) -> Optional[WeatherAtTime]:
+        if forecast_time.tzinfo is None:
             return None
 
         params = urlencode(
@@ -74,10 +74,13 @@ class WeatherForecastResolver:
         for t, temp, code in zip(times, temps, codes):
             by_hour[t] = (float(temp), int(code))
 
-        hour_key = event_start.strftime("%Y-%m-%dT%H:00")
+        hour_key = forecast_time.strftime("%Y-%m-%dT%H:00")
         values = by_hour.get(hour_key)
         if values is None:
             return None
 
         temp, code = values
         return WeatherAtTime(temperature_f=int(round(temp)), icon=_weather_icon(code))
+
+    def forecast_for_event_start(self, event_start: datetime) -> Optional[WeatherAtTime]:
+        return self.forecast_for_datetime(event_start)
