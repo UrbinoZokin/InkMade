@@ -26,10 +26,10 @@ PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather
 
 # 🚀 Quick Install (one command)
 
-curl -fsSL https://raw.githubusercontent.com/UrbinoZokin/InkMade/Calendar_debugging/scripts/bootstrap.sh | \
+curl -fsSL https://raw.githubusercontent.com/UrbinoZokin/InkMade/main/scripts/bootstrap.sh | \
 REPO_URL="https://github.com/UrbinoZokin/InkMade.git" bash
 
 cd /opt/inkycal \
 git fetch origin \
-git reset --hard origin/Calendar_debugging \
+git reset --hard origin/main \
 chmod +x /opt/inkycal/scripts/update.sh
