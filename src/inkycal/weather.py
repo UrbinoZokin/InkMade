@@ -16,14 +16,16 @@ class WeatherAtTime:
 
 def _weather_icon(weather_code: int) -> str:
     # WMO weather codes from Open-Meteo.
+    # Keep glyphs in a subset that's reliably present in DejaVuSans so
+    # weather icons render on the e-ink display instead of tofu boxes.
     if weather_code == 0:
         return "☀"
     if weather_code in {1, 2}:
-        return "⛅"
+        return "☁"
     if weather_code == 3:
         return "☁"
     if weather_code in {45, 48}:
-        return "🌫"
+        return "☁"
     if weather_code in {51, 53, 55, 56, 57}:
         return "☂"
     if weather_code in {61, 63, 65, 66, 67, 80, 81, 82}:

@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 
 from inkycal.main import _apply_weather_forecast, _events_signature
 from inkycal.models import Event
+from inkycal.weather import _weather_icon
 
 
 class StubWeatherResolver:
@@ -73,3 +74,10 @@ def test_events_signature_ignores_weather_fields():
     )
 
     assert hash_without_weather == hash_with_weather
+
+
+def test_weather_icons_use_dejavu_safe_symbols_for_partial_cloud_and_fog():
+    assert _weather_icon(1) == "☁"
+    assert _weather_icon(2) == "☁"
+    assert _weather_icon(45) == "☁"
+    assert _weather_icon(48) == "☁"
