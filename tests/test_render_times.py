@@ -229,3 +229,44 @@ def test_today_separator_is_drawn_below_weather_text(monkeypatch):
     first_separator_below_weather = min(y for _, y, _, _ in full_width_separators if y > weather_temp_xy[1])
 
     assert first_separator_below_weather >= weather_bottom
+
+
+def test_long_event_weather_temperatures_use_temperature_colors(monkeypatch):
+    tz = ZoneInfo("America/Phoenix")
+    event = Event(
+        source="google",
+        title="Workshop",
+        start=datetime(2026, 2, 5, 9, 0, tzinfo=tz),
+        end=datetime(2026, 2, 5, 11, 0, tzinfo=tz),
+        weather_icon="☀",
+        weather_text="68°F",
+        weather_temperature_f=68,
+        weather_end_icon="☁",
+        weather_end_text="92°F",
+        weather_end_temperature_f=92,
+    )
+
+    observed_fills = {}
+
+    from PIL import ImageDraw
+
+    original_text = ImageDraw.ImageDraw.text
+
+    def recording_text(self, xy, text, *args, **kwargs):
+        observed_fills.setdefault(text, []).append(kwargs.get("fill"))
+        return original_text(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", recording_text)
+
+    render_daily_schedule(
+        canvas_w=800,
+        canvas_h=480,
+        now=datetime(2026, 2, 5, 0, 0, tzinfo=tz),
+        events=[event],
+        tz=tz,
+        show_sleep_banner=False,
+        sleep_banner_text="",
+    )
+
+    assert observed_fills["68°F"][0] != "black"
+    assert observed_fills["92°F"][0] != "black"

@@ -78,7 +78,39 @@ def _draw_weather_text(
         return
 
     if event.weather_end_icon or event.weather_end_text:
-        draw.text((x, y), _weather_label(event), fill="black", font=font)
+        if icon:
+            draw.text((x, y), icon, fill="black", font=font)
+            x += draw.textlength(icon, font=font)
+
+        if icon and temp_text:
+            spacer = " "
+            draw.text((x, y), spacer, fill="black", font=font)
+            x += draw.textlength(spacer, font=font)
+
+        if temp_text:
+            draw.text((x, y), temp_text, fill=_temperature_color(event.weather_temperature_f), font=font)
+            x += draw.textlength(temp_text, font=font)
+
+        arrow = " → "
+        draw.text((x, y), arrow, fill="black", font=font)
+        x += draw.textlength(arrow, font=font)
+
+        if event.weather_end_icon:
+            draw.text((x, y), event.weather_end_icon, fill="black", font=font)
+            x += draw.textlength(event.weather_end_icon, font=font)
+
+        if event.weather_end_icon and event.weather_end_text:
+            spacer = " "
+            draw.text((x, y), spacer, fill="black", font=font)
+            x += draw.textlength(spacer, font=font)
+
+        if event.weather_end_text:
+            draw.text(
+                (x, y),
+                event.weather_end_text,
+                fill=_temperature_color(event.weather_end_temperature_f),
+                font=font,
+            )
         return
 
     if icon:

@@ -138,7 +138,13 @@ def _apply_travel_times(events: List[Event], origin_address: str, back_to_back_w
 
 
 
-def _apply_weather_forecast(events: List[Event], timezone: str, latitude: float, longitude: float) -> List[Event]:
+def _apply_weather_forecast(
+    events: List[Event],
+    timezone: str,
+    latitude: float,
+    longitude: float,
+    include_end_weather_for_long_events: bool = True,
+) -> List[Event]:
     resolver = WeatherForecastResolver(timezone=timezone, latitude=latitude, longitude=longitude)
     processed: List[Event] = []
     for event in events:
@@ -163,7 +169,7 @@ def _apply_weather_forecast(events: List[Event], timezone: str, latitude: float,
             weather_icon = weather.icon
             weather_temperature_f = weather.temperature_f
 
-        if (event.end - event.start) > timedelta(minutes=60):
+        if include_end_weather_for_long_events and (event.end - event.start) > timedelta(minutes=60):
             try:
                 end_weather = resolver.forecast_for_datetime(event.end)
             except Exception as e:
@@ -377,6 +383,7 @@ def run_once(
         cfg.timezone,
         cfg.weather.latitude,
         cfg.weather.longitude,
+        include_end_weather_for_long_events=False,
     )
 
     img = render_daily_schedule(
