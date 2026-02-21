@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import unicodedata
 from datetime import datetime, time, timedelta
 from typing import List
 from zoneinfo import ZoneInfo
@@ -50,25 +52,51 @@ def _normalize_text(value: str | None) -> str:
     return " ".join(value.strip().lower().split())
 
 
+def _fingerprint_text(value: str | None) -> str:
+    normalized = unicodedata.normalize("NFKC", _normalize_text(value)).casefold()
+    return re.sub(r"[^\w]", "", normalized, flags=re.UNICODE)
+
+
+def _event_quality_score(event: Event) -> tuple[int, int]:
+    return (1 if _fingerprint_text(event.location) else 0, len(event.title.strip()))
+
+
 def _event_sort_key(e: Event):
     return (0 if e.all_day else 1, e.start, e.title.lower())
 
 
 def _dedupe_events(events: List[Event]) -> List[Event]:
     deduped: List[Event] = []
-    seen = set()
+    seen_by_base_key: dict[tuple[str, str, str, bool], list[int]] = {}
+
     for e in sorted(events, key=_event_sort_key):
-        key = (
-            _normalize_text(e.title),
+        base_key = (
+            _fingerprint_text(e.title),
             e.start.isoformat(),
             e.end.isoformat(),
             bool(e.all_day),
-            _normalize_text(e.location),
         )
-        if key in seen:
+
+        location_fingerprint = _fingerprint_text(e.location)
+        duplicate_index: int | None = None
+        for idx in seen_by_base_key.get(base_key, []):
+            existing_location_fingerprint = _fingerprint_text(deduped[idx].location)
+            if (
+                location_fingerprint == existing_location_fingerprint
+                or not location_fingerprint
+                or not existing_location_fingerprint
+            ):
+                duplicate_index = idx
+                break
+
+        if duplicate_index is not None:
+            if _event_quality_score(e) > _event_quality_score(deduped[duplicate_index]):
+                deduped[duplicate_index] = e
             continue
-        seen.add(key)
+
+        seen_by_base_key.setdefault(base_key, []).append(len(deduped))
         deduped.append(e)
+
     return deduped
 
 
