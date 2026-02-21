@@ -11,6 +11,10 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont:
     # DejaVu is commonly available on Raspberry Pi; install via apt in scripts/install.sh
     return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
 
+
+def _load_bold_font(size: int) -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size)
+
 def _format_header(now: datetime) -> tuple[str, str]:
     # Example: Thursday / February 5, 2026
     return now.strftime("%A"), now.strftime("%B %-d, %Y")
@@ -71,6 +75,7 @@ def _draw_weather_text(
     y: float,
     event: Event,
     font: ImageFont.FreeTypeFont,
+    temperature_font: ImageFont.FreeTypeFont,
 ) -> None:
     icon = event.weather_icon or ""
     temp_text = event.weather_text or ""
@@ -88,8 +93,15 @@ def _draw_weather_text(
             x += draw.textlength(spacer, font=font)
 
         if temp_text:
-            draw.text((x, y), temp_text, fill=_temperature_color(event.weather_temperature_f), font=font)
-            x += draw.textlength(temp_text, font=font)
+            draw.text(
+                (x, y),
+                temp_text,
+                fill=_temperature_color(event.weather_temperature_f),
+                font=temperature_font,
+                stroke_width=2,
+                stroke_fill="black",
+            )
+            x += draw.textlength(temp_text, font=temperature_font)
 
         arrow = " → "
         draw.text((x, y), arrow, fill="black", font=font)
@@ -109,7 +121,9 @@ def _draw_weather_text(
                 (x, y),
                 event.weather_end_text,
                 fill=_temperature_color(event.weather_end_temperature_f),
-                font=font,
+                font=temperature_font,
+                stroke_width=2,
+                stroke_fill="black",
             )
         return
 
@@ -123,7 +137,14 @@ def _draw_weather_text(
         x += draw.textlength(spacer, font=font)
 
     if temp_text:
-        draw.text((x, y), temp_text, fill=_temperature_color(event.weather_temperature_f), font=font)
+        draw.text(
+            (x, y),
+            temp_text,
+            fill=_temperature_color(event.weather_temperature_f),
+            font=temperature_font,
+            stroke_width=2,
+            stroke_fill="black",
+        )
 
 
 def _wrap_text(
@@ -230,6 +251,8 @@ def render_daily_schedule(
     font_small = _load_font(30)
     font_alert_header = _load_font(34)
     font_today_weather = _load_font(38)
+    font_today_weather_bold = _load_bold_font(38)
+    font_small_bold = _load_bold_font(30)
 
     padding = 40
     y = padding
@@ -358,7 +381,14 @@ def render_daily_schedule(
             if weather_text:
                 weather_w = d.textlength(weather_text, font=font_today_weather)
                 x_weather = padding + max(0, (time_col_w - weather_w) / 2)
-                _draw_weather_text(d, x_weather, y + font_time.size + 4, e, font_today_weather)
+                _draw_weather_text(
+                    d,
+                    x_weather,
+                    y + font_time.size + 4,
+                    e,
+                    font_today_weather,
+                    font_today_weather_bold,
+                )
 
             divider_x = padding + time_col_w + (column_gap // 2)
             d.line((divider_x, y, divider_x, row_start_y + row_h), fill="black", width=1)
@@ -508,7 +538,14 @@ def render_daily_schedule(
                     d.text((padding + max(0, time_col_w - time_w), y), time_str, fill="black", font=time_font)
                     weather_text = _weather_label(e)
                     if weather_text:
-                        _draw_weather_text(d, padding + time_col_w + gap, y, e, font_small)
+                        _draw_weather_text(
+                            d,
+                            padding + time_col_w + gap,
+                            y,
+                            e,
+                            font_small,
+                            font_small_bold,
+                        )
 
                     first_divider_x = padding + time_col_w + (gap // 2)
                     second_divider_x = padding + time_col_w + gap + weather_col_w + (gap // 2)
