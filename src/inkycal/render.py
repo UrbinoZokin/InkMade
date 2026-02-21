@@ -367,7 +367,12 @@ def render_daily_schedule(
         row_h = layout["row_h"]
 
         row_start_y = y
-        content_y = row_start_y + title_line_h * len(lines) + 6
+        title_y = row_start_y
+        if len(lines) == 1 and not detail_text:
+            single_line_h = title_line_h
+            title_y = row_start_y + max(0, int((row_h - single_line_h) / 2))
+
+        content_y = title_y + title_line_h * len(lines) + 6
 
         if not overflow_mode and y + layout["total_row_h"] > max_y:
             d.text((padding, y), "…", fill="black", font=font_header)
@@ -395,7 +400,7 @@ def render_daily_schedule(
             d.line((divider_x, y, divider_x, row_start_y + row_h), fill="black", width=1)
 
         for i, line in enumerate(lines):
-            d.text((x_title, y + i * title_line_h), line, fill="black", font=font_title)
+            d.text((x_title, title_y + i * title_line_h), line, fill="black", font=font_title)
 
         if detail_text:
             d.text((x_title, content_y), detail_text, fill="black", font=font_small)
