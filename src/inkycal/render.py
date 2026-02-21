@@ -524,7 +524,7 @@ def render_daily_schedule(
                 default=0,
             )
             gap = int(time_font.size * 0.45)
-            weather_divider_padding = 6
+            weather_divider_padding = 12
 
             for e, lines in zip(tomorrow_sorted, chosen_lines):
                 time_str = "" if e.all_day else f"{_fmt_time(e.start)}–{_fmt_time(e.end)}"
@@ -537,7 +537,7 @@ def render_daily_schedule(
                 if time_str:
                     left_col_h = time_font.size
                     if _weather_label(e):
-                        left_col_h += 4 + font_tomorrow_weather.size
+                        left_col_h = max(left_col_h, font_tomorrow_weather.size)
                 row_h = max(chosen_profile["min_row_h"], content_y - row_start_y + 6, left_col_h + 6)
                 total_h = row_h + chosen_profile["sep"]
 
