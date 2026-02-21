@@ -124,8 +124,8 @@ def test_weather_is_drawn_in_time_weather_column_for_today(monkeypatch):
 
     weather_icon_call = next(call for call in observed_calls if call[1] == "☀")
     weather_temp_call = next(call for call in observed_calls if call[1] == "68°F")
-    assert weather_icon_call[2].size == 38
-    assert weather_temp_call[2].size == 38
+    assert weather_icon_call[2].size == 44
+    assert weather_temp_call[2].size == 44
 
     # with mocked text lengths, first event weather width is 6 chars = 60 px,
     # and time/weather column width is 160 px from the longest time range text.
