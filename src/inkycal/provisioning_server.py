@@ -57,6 +57,14 @@ class ProvisioningRequestHandler(BaseHTTPRequestHandler):
             data = self._read_json()
             if self.path == "/wifi":
                 result = service.set_wifi(data.get("ssid", ""), data.get("password", ""))
+            elif self.path == "/connection/start":
+                result = service.start_connection()
+            elif self.path == "/connection/authorize":
+                result = service.create_authorization_code(
+                    continue_when_active=bool(data.get("continue_when_active", False))
+                )
+            elif self.path == "/connection/complete":
+                result = service.complete_connection(str(data.get("authorization_code", "")))
             elif self.path == "/icloud":
                 service.set_icloud_credentials(data.get("username", ""), data.get("app_password", ""))
                 result = {"ok": True}
