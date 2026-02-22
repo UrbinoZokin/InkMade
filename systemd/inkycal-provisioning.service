@@ -1,0 +1,18 @@
+[Unit]
+Description=InkyCal provisioning API (for BLE/mobile setup bridge)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/opt/inkycal/.env
+ExecStart=/opt/inkycal/venv/bin/python -m inkycal.provisioning_server
+User=pi
+Group=pi
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
