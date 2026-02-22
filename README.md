@@ -91,6 +91,9 @@ If you want, the next step is to add a concrete implementation plan in this repo
 A first provisioning backend is now included so you can start wiring a Flutter app to real device config updates:
 
 - `inkycal.provisioning_server` → local HTTP JSON API (intended to be called by a BLE bridge process).
+- `POST /connection/start` checks if the Pi is reachable and whether active services require a continue prompt.
+- `POST /connection/authorize` generates a random 6-digit on-screen authorization code.
+- `POST /connection/complete` verifies the user-entered authorization code to finish pairing.
 - `inkycal.provisioning` → core provisioning service (Wi-Fi via `nmcli`, config updates, `.env` secret updates, apply/restart).
 - `inkycal.provisioning_cli` → command-line utility for manual testing.
 - `systemd/inkycal-provisioning.service` → optional always-on provisioning API unit.

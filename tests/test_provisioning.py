@@ -86,3 +86,56 @@ def test_parse_payload_requires_json_object():
         assert "must be an object" in str(exc)
     else:
         raise AssertionError("Expected ValueError for non-object payload")
+
+
+def test_start_connection_requires_continue_prompt_when_services_active(tmp_path: Path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/systemctl" if name == "systemctl" else None)
+
+    def fake_runner(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["systemctl", "is-active"]:
+            return _completed(cmd, stdout="active\n")
+        return _completed(cmd)
+
+    service = ProvisioningService(ProvisioningPaths(config_path=config_path, env_path=env_path), runner=fake_runner)
+    status = service.start_connection()
+
+    assert status["can_connect"] is True
+    assert status["prompt_continue"] is True
+
+
+def test_authorization_code_must_be_confirmed_then_matches(tmp_path: Path, monkeypatch):
+    paths = ProvisioningPaths(
+        config_path=tmp_path / "config.yaml",
+        env_path=tmp_path / ".env",
+        pairing_state_path=tmp_path / "pairing_state.json",
+    )
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/systemctl" if name == "systemctl" else None)
+
+    def fake_runner(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["systemctl", "is-active"]:
+            return _completed(cmd, stdout="active\n")
+        return _completed(cmd)
+
+    service = ProvisioningService(paths, runner=fake_runner)
+
+    try:
+        service.create_authorization_code(continue_when_active=False)
+    except ValueError as exc:
+        assert "Confirmation required" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError when services are active")
+
+    auth = service.create_authorization_code(continue_when_active=True)
+    code = auth["display_authorization_code"]
+    assert len(code) == 6
+    assert code.isdigit()
+
+    mismatch = service.complete_connection("000000")
+    assert mismatch["connected"] is False
+
+    success = service.complete_connection(code)
+    assert success["connected"] is True

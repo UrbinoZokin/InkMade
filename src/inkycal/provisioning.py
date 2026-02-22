@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ CommandRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
 class ProvisioningPaths:
     config_path: Path = Path("/opt/inkycal/config.yaml")
     env_path: Path = Path("/opt/inkycal/.env")
+    pairing_state_path: Path = Path("/opt/inkycal/pairing_state.json")
 
 
 class ProvisioningService:
@@ -29,6 +31,11 @@ class ProvisioningService:
     def get_status(self) -> Dict[str, Any]:
         return {
             "wifi": self._get_wifi_status(),
+            "connection": {
+                "always_available": True,
+                "services_active": self._services_active(),
+                "authorized": self._load_pairing_state().get("authorized", False),
+            },
             "config": self._load_config(),
             "env": {
                 "has_icloud_username": bool(self._load_env().get("ICLOUD_USERNAME")),
@@ -37,6 +44,43 @@ class ProvisioningService:
                 "has_google_token_path": bool(self._load_env().get("GOOGLE_TOKEN_JSON")),
             },
         }
+
+    def start_connection(self) -> Dict[str, Any]:
+        services_active = self._services_active()
+        return {
+            "can_connect": True,
+            "services_active": services_active,
+            "prompt_continue": services_active,
+            "prompt_message": (
+                "Raspberry Pi services are already active. Continue connecting to the calendar?"
+                if services_active
+                else None
+            ),
+        }
+
+    def create_authorization_code(self, continue_when_active: bool = False) -> Dict[str, Any]:
+        services_active = self._services_active()
+        if services_active and not continue_when_active:
+            raise ValueError("Confirmation required before connecting while services are active.")
+
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        self._write_pairing_state({"authorization_code": code, "authorized": False})
+        return {
+            "display_authorization_code": code,
+            "code_length": 6,
+        }
+
+    def complete_connection(self, authorization_code: str) -> Dict[str, Any]:
+        state = self._load_pairing_state()
+        expected = str(state.get("authorization_code", ""))
+        provided = authorization_code.strip()
+        if not expected:
+            raise ValueError("No pending authorization code. Start connection first.")
+        if provided != expected:
+            return {"connected": False, "error": "authorization_code_mismatch"}
+
+        self._write_pairing_state({"authorization_code": expected, "authorized": True})
+        return {"connected": True}
 
     def set_wifi(self, ssid: str, password: str) -> Dict[str, Any]:
         ssid = ssid.strip()
@@ -153,6 +197,26 @@ class ProvisioningService:
             if line.startswith("yes:"):
                 return {"connected": True, "ssid": line.split(":", 1)[1]}
         return {"connected": False}
+
+    def _services_active(self) -> bool:
+        if shutil.which("systemctl") is None:
+            return False
+
+        result = self.runner(["systemctl", "is-active", "inkycal.timer"])
+        return result.returncode == 0 and result.stdout.strip() == "active"
+
+    def _load_pairing_state(self) -> Dict[str, Any]:
+        if not self.paths.pairing_state_path.exists():
+            return {}
+        try:
+            raw = json.loads(self.paths.pairing_state_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return {}
+        return raw if isinstance(raw, dict) else {}
+
+    def _write_pairing_state(self, state: Dict[str, Any]) -> None:
+        self.paths.pairing_state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.paths.pairing_state_path.write_text(json.dumps(state), encoding="utf-8")
 
     @staticmethod
     def _run_command(cmd: list[str]) -> subprocess.CompletedProcess[str]:
