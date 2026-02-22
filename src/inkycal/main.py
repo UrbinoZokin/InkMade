@@ -241,7 +241,10 @@ def _fetch_events_for_range(cfg, range_start: datetime, range_end: datetime, tz:
         creds_path = os.environ.get("GOOGLE_CREDENTIALS_JSON", "")
         token_path = os.environ.get("GOOGLE_TOKEN_JSON", "")
         if creds_path and token_path:
-            events.extend(fetch_google_events(cfg.google.calendar_ids, range_start, range_end, tz, creds_path, token_path))
+            try:
+                events.extend(fetch_google_events(cfg.google.calendar_ids, range_start, range_end, tz, creds_path, token_path))
+            except Exception as e:
+                print(f"Google Calendar fetch failed; continuing without Google events. Error: {e}")
 
     if cfg.icloud.enabled:
         try:
