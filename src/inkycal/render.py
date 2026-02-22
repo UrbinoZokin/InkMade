@@ -1,15 +1,19 @@
 from __future__ import annotations
-from dataclasses import asdict
 from datetime import datetime
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 from PIL import Image, ImageDraw, ImageFont
 
 from .models import Event
+from .weather import WeatherAlert
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont:
     # DejaVu is commonly available on Raspberry Pi; install via apt in scripts/install.sh
     return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
+
+
+def _load_bold_font(size: int) -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size)
 
 def _format_header(now: datetime) -> tuple[str, str]:
     # Example: Thursday / February 5, 2026
@@ -71,6 +75,7 @@ def _draw_weather_text(
     y: float,
     event: Event,
     font: ImageFont.FreeTypeFont,
+    temperature_font: ImageFont.FreeTypeFont,
 ) -> None:
     icon = event.weather_icon or ""
     temp_text = event.weather_text or ""
@@ -88,8 +93,15 @@ def _draw_weather_text(
             x += draw.textlength(spacer, font=font)
 
         if temp_text:
-            draw.text((x, y), temp_text, fill=_temperature_color(event.weather_temperature_f), font=font)
-            x += draw.textlength(temp_text, font=font)
+            draw.text(
+                (x, y),
+                temp_text,
+                fill=_temperature_color(event.weather_temperature_f),
+                font=temperature_font,
+                stroke_width=2,
+                stroke_fill="black",
+            )
+            x += draw.textlength(temp_text, font=temperature_font)
 
         arrow = " → "
         draw.text((x, y), arrow, fill="black", font=font)
@@ -109,7 +121,9 @@ def _draw_weather_text(
                 (x, y),
                 event.weather_end_text,
                 fill=_temperature_color(event.weather_end_temperature_f),
-                font=font,
+                font=temperature_font,
+                stroke_width=2,
+                stroke_fill="black",
             )
         return
 
@@ -123,7 +137,14 @@ def _draw_weather_text(
         x += draw.textlength(spacer, font=font)
 
     if temp_text:
-        draw.text((x, y), temp_text, fill=_temperature_color(event.weather_temperature_f), font=font)
+        draw.text(
+            (x, y),
+            temp_text,
+            fill=_temperature_color(event.weather_temperature_f),
+            font=temperature_font,
+            stroke_width=2,
+            stroke_fill="black",
+        )
 
 
 def _wrap_text(
@@ -191,6 +212,22 @@ def _today_event_layout(
         "total_row_h": row_h + 18,
     }
 
+
+def _prepare_weather_alert_lines(
+    draw: ImageDraw.ImageDraw,
+    alerts: List[WeatherAlert],
+    font: ImageFont.FreeTypeFont,
+    max_width: float,
+) -> List[str]:
+    if not alerts:
+        return []
+
+    lines: List[str] = []
+    for alert in alerts:
+        wrapped = _wrap_text(draw, f"• {alert.headline}", font, max_width, max_lines=2)
+        lines.extend(wrapped)
+    return lines
+
 def render_daily_schedule(
     canvas_w: int,
     canvas_h: int,
@@ -202,6 +239,7 @@ def render_daily_schedule(
     wifi_status: str = "connected",
     ups_status: Optional[dict] = None,
     tomorrow_events: Optional[List[Event]] = None,
+    weather_alerts: Optional[List[WeatherAlert]] = None,
 ) -> Image.Image:
     img = Image.new("RGB", (canvas_w, canvas_h), "white")
     d = ImageDraw.Draw(img)
@@ -211,7 +249,11 @@ def render_daily_schedule(
     font_time = _load_font(46)
     font_title = _load_font(52)
     font_small = _load_font(30)
-    font_today_weather = _load_font(38)
+    font_alert_header = _load_font(34)
+    font_today_weather = _load_font(44)
+    font_today_weather_bold = _load_bold_font(44)
+    font_tomorrow_weather = _load_font(36)
+    font_tomorrow_weather_bold = _load_bold_font(36)
 
     padding = 40
     y = padding
@@ -261,7 +303,20 @@ def render_daily_schedule(
         if ups_right - ups_text_w < min_ups_x:
             ups_on_second_line = True
             updated_block_h += ups_text_h + 8
-    max_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - updated_block_h
+
+    weather_alert_lines = _prepare_weather_alert_lines(
+        d,
+        weather_alerts or [],
+        font_small,
+        canvas_w - (2 * padding),
+    )
+    weather_alert_line_h = font_small.size + 4
+    weather_alert_header_h = font_alert_header.size + 6
+    weather_alert_block_h = 0
+    if weather_alert_lines:
+        weather_alert_block_h = weather_alert_header_h + (len(weather_alert_lines) * weather_alert_line_h) + 24
+
+    max_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - updated_block_h - weather_alert_block_h
 
     today_layouts = [
         _today_event_layout(
@@ -312,7 +367,12 @@ def render_daily_schedule(
         row_h = layout["row_h"]
 
         row_start_y = y
-        content_y = row_start_y + title_line_h * len(lines) + 6
+        title_y = row_start_y
+        if len(lines) == 1 and not detail_text:
+            single_line_h = title_line_h
+            title_y = row_start_y + max(0, int((row_h - single_line_h) / 2))
+
+        content_y = title_y + title_line_h * len(lines) + 6
 
         if not overflow_mode and y + layout["total_row_h"] > max_y:
             d.text((padding, y), "…", fill="black", font=font_header)
@@ -327,13 +387,20 @@ def render_daily_schedule(
             if weather_text:
                 weather_w = d.textlength(weather_text, font=font_today_weather)
                 x_weather = padding + max(0, (time_col_w - weather_w) / 2)
-                _draw_weather_text(d, x_weather, y + font_time.size + 4, e, font_today_weather)
+                _draw_weather_text(
+                    d,
+                    x_weather,
+                    y + font_time.size + 4,
+                    e,
+                    font_today_weather,
+                    font_today_weather_bold,
+                )
 
             divider_x = padding + time_col_w + (column_gap // 2)
             d.line((divider_x, y, divider_x, row_start_y + row_h), fill="black", width=1)
 
         for i, line in enumerate(lines):
-            d.text((x_title, y + i * title_line_h), line, fill="black", font=font_title)
+            d.text((x_title, title_y + i * title_line_h), line, fill="black", font=font_title)
 
         if detail_text:
             d.text((x_title, content_y), detail_text, fill="black", font=font_small)
@@ -388,7 +455,7 @@ def render_daily_schedule(
                     (d.textlength(s, font=profile_time_font) for s in profile_time_strings),
                     default=0,
                 )
-                profile_weather_w = max((d.textlength(s, font=font_small) for s in profile_weather_strings), default=0)
+                profile_weather_w = max((d.textlength(s, font=font_tomorrow_weather) for s in profile_weather_strings), default=0)
                 profile_gap = int(profile_time_font.size * 0.45)
                 profile_lines = [
                     _wrap_text(
@@ -408,7 +475,12 @@ def render_daily_schedule(
                     content_y = test_y + profile["title_line_h"] * len(lines) + 4
                     if (e.travel_time_text or "").strip():
                         content_y += font_small.size + 6
-                    row_h = max(profile["min_row_h"], content_y - test_y + 6)
+                    profile_left_col_h = 0
+                    if not e.all_day:
+                        profile_left_col_h = profile_time_font.size
+                        if _weather_label(e):
+                            profile_left_col_h += 4 + font_tomorrow_weather.size
+                    row_h = max(profile["min_row_h"], content_y - test_y + 6, profile_left_col_h + 6)
                     total_h = row_h + profile["sep"]
                     if test_y + total_h > max_y:
                         fits = False
@@ -433,7 +505,7 @@ def render_daily_schedule(
                     default=0,
                 )
                 fallback_weather_strings = [_weather_label(e) for e in tomorrow_sorted if not e.all_day and _weather_label(e)]
-                fallback_weather_w = max((d.textlength(s, font=font_small) for s in fallback_weather_strings), default=0)
+                fallback_weather_w = max((d.textlength(s, font=font_tomorrow_weather) for s in fallback_weather_strings), default=0)
                 fallback_gap = int(time_font.size * 0.45)
                 chosen_lines = [
                     _wrap_text(
@@ -453,10 +525,11 @@ def render_daily_schedule(
                 default=0,
             )
             weather_col_w = max(
-                (d.textlength(_weather_label(e), font=font_small) for e in tomorrow_sorted if not e.all_day and _weather_label(e)),
+                (d.textlength(_weather_label(e), font=font_tomorrow_weather) for e in tomorrow_sorted if not e.all_day and _weather_label(e)),
                 default=0,
             )
             gap = int(time_font.size * 0.45)
+            weather_divider_padding = 12
 
             for e, lines in zip(tomorrow_sorted, chosen_lines):
                 time_str = "" if e.all_day else f"{_fmt_time(e.start)}–{_fmt_time(e.end)}"
@@ -465,7 +538,12 @@ def render_daily_schedule(
                 detail_text = (e.travel_time_text or "").strip()
                 if detail_text:
                     content_y += font_small.size + 6
-                row_h = max(chosen_profile["min_row_h"], content_y - row_start_y + 6)
+                left_col_h = 0
+                if time_str:
+                    left_col_h = time_font.size
+                    if _weather_label(e):
+                        left_col_h = max(left_col_h, font_tomorrow_weather.size)
+                row_h = max(chosen_profile["min_row_h"], content_y - row_start_y + 6, left_col_h + 6)
                 total_h = row_h + chosen_profile["sep"]
 
                 if y + total_h > max_y:
@@ -477,14 +555,21 @@ def render_daily_schedule(
                     d.text((padding + max(0, time_col_w - time_w), y), time_str, fill="black", font=time_font)
                     weather_text = _weather_label(e)
                     if weather_text:
-                        _draw_weather_text(d, padding + time_col_w + gap, y, e, font_small)
+                        _draw_weather_text(
+                            d,
+                            padding + time_col_w + gap,
+                            y,
+                            e,
+                            font_tomorrow_weather,
+                            font_tomorrow_weather_bold,
+                        )
 
                     first_divider_x = padding + time_col_w + (gap // 2)
-                    second_divider_x = padding + time_col_w + gap + weather_col_w + (gap // 2)
+                    second_divider_x = padding + time_col_w + gap + weather_col_w + weather_divider_padding
                     d.line((first_divider_x, y, first_divider_x, row_start_y + row_h), fill="black", width=1)
                     d.line((second_divider_x, y, second_divider_x, row_start_y + row_h), fill="black", width=1)
 
-                x_title = padding if e.all_day else padding + time_col_w + weather_col_w + (gap * 2)
+                x_title = padding if e.all_day else second_divider_x + (gap // 2)
                 for i, line in enumerate(lines):
                     d.text(
                         (x_title, y + i * chosen_profile["title_line_h"]),
@@ -505,6 +590,20 @@ def render_daily_schedule(
                 d.line((padding, y, canvas_w - padding, y), fill="black", width=1)
                 y += chosen_profile["sep"]
     bottom_y = canvas_h - padding - (banner_h if show_sleep_banner else 0)
+    alert_bottom_y = bottom_y - updated_block_h
+    if weather_alert_lines:
+        alert_top = alert_bottom_y - weather_alert_block_h
+        alert_bottom = alert_bottom_y - 6
+        d.rectangle((padding, alert_top, canvas_w - padding, alert_bottom), outline="red", width=3)
+        alert_header_y = alert_top + 8
+        d.text((padding + 12, alert_header_y), "NATIONAL WEATHER SERVICE ALERT", fill="red", font=font_alert_header)
+
+        line_start_y = alert_header_y + weather_alert_header_h
+        d.line((padding + 10, line_start_y - 4, canvas_w - padding - 10, line_start_y - 4), fill="red", width=2)
+        for line in weather_alert_lines:
+            d.text((padding + 12, line_start_y), line, fill="black", font=font_small)
+            line_start_y += weather_alert_line_h
+
     updated_y = bottom_y - updated_text_h
     if ups_text:
         ups_text_w = d.textlength(ups_text, font=font_small)

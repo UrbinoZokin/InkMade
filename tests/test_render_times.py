@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 
 from inkycal.models import Event
 from inkycal.render import render_daily_schedule
+from inkycal.weather import WeatherAlert
 
 
 def test_renders_each_event_time_once(monkeypatch):
@@ -123,8 +124,8 @@ def test_weather_is_drawn_in_time_weather_column_for_today(monkeypatch):
 
     weather_icon_call = next(call for call in observed_calls if call[1] == "☀")
     weather_temp_call = next(call for call in observed_calls if call[1] == "68°F")
-    assert weather_icon_call[2].size == 38
-    assert weather_temp_call[2].size == 38
+    assert weather_icon_call[2].size == 44
+    assert weather_temp_call[2].size == 44
 
     # with mocked text lengths, first event weather width is 6 chars = 60 px,
     # and time/weather column width is 160 px from the longest time range text.
@@ -356,3 +357,61 @@ def test_no_overflow_mode_keeps_finished_events_visible(monkeypatch):
     assert "Morning" in observed_text
     assert "Sync" in observed_text
     assert not any(text.startswith("Plus ") and text.endswith(" more events") for text in observed_text)
+
+
+def test_weather_alerts_render_above_footer_and_reduce_event_space(monkeypatch):
+    tz = ZoneInfo("America/Phoenix")
+    now = datetime(2026, 2, 5, 12, 0, tzinfo=tz)
+    events = [
+        Event(
+            source="google",
+            title=f"Event {idx}",
+            start=datetime(2026, 2, 5, idx, 0, tzinfo=tz),
+            end=datetime(2026, 2, 5, idx, 45, tzinfo=tz),
+        )
+        for idx in range(8, 16)
+    ]
+
+    observed_without_alerts = []
+    observed_with_alerts = []
+
+    from PIL import ImageDraw
+
+    original_text = ImageDraw.ImageDraw.text
+
+    def recording_without_alerts(self, xy, text, *args, **kwargs):
+        observed_without_alerts.append(text)
+        return original_text(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", recording_without_alerts)
+    render_daily_schedule(
+        canvas_w=800,
+        canvas_h=900,
+        now=now,
+        events=events,
+        tz=tz,
+        show_sleep_banner=False,
+        sleep_banner_text="",
+    )
+
+    def recording_with_alerts(self, xy, text, *args, **kwargs):
+        observed_with_alerts.append(text)
+        return original_text(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", recording_with_alerts)
+    render_daily_schedule(
+        canvas_w=800,
+        canvas_h=900,
+        now=now,
+        events=events,
+        tz=tz,
+        show_sleep_banner=False,
+        sleep_banner_text="",
+        weather_alerts=[WeatherAlert(headline="Flood Warning until 7PM")],
+    )
+
+    rendered_event_words_without_alerts = sum(1 for text in observed_without_alerts if text == "Event")
+    rendered_event_words_with_alerts = sum(1 for text in observed_with_alerts if text == "Event")
+
+    assert rendered_event_words_with_alerts <= rendered_event_words_without_alerts
+    assert "NATIONAL WEATHER SERVICE ALERT" in observed_with_alerts

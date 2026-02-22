@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import unicodedata
 from datetime import datetime, time, timedelta
 from typing import List
 from zoneinfo import ZoneInfo
@@ -16,7 +18,7 @@ from .display_inky import show_on_inky
 from .models import Event
 from .network import get_ups_status, get_wifi_status
 from .render import render_daily_schedule
-from .weather import WeatherForecastResolver
+from .weather import WeatherAlert, WeatherForecastResolver
 from .state import State, load_state, save_state
 from .travel import TravelTimeResolver
 
@@ -50,25 +52,51 @@ def _normalize_text(value: str | None) -> str:
     return " ".join(value.strip().lower().split())
 
 
+def _fingerprint_text(value: str | None) -> str:
+    normalized = unicodedata.normalize("NFKC", _normalize_text(value)).casefold()
+    return re.sub(r"[^\w]", "", normalized, flags=re.UNICODE)
+
+
+def _event_quality_score(event: Event) -> tuple[int, int]:
+    return (1 if _fingerprint_text(event.location) else 0, len(event.title.strip()))
+
+
 def _event_sort_key(e: Event):
     return (0 if e.all_day else 1, e.start, e.title.lower())
 
 
 def _dedupe_events(events: List[Event]) -> List[Event]:
     deduped: List[Event] = []
-    seen = set()
+    seen_by_base_key: dict[tuple[str, str, str, bool], list[int]] = {}
+
     for e in sorted(events, key=_event_sort_key):
-        key = (
-            _normalize_text(e.title),
+        base_key = (
+            _fingerprint_text(e.title),
             e.start.isoformat(),
             e.end.isoformat(),
             bool(e.all_day),
-            _normalize_text(e.location),
         )
-        if key in seen:
+
+        location_fingerprint = _fingerprint_text(e.location)
+        duplicate_index: int | None = None
+        for idx in seen_by_base_key.get(base_key, []):
+            existing_location_fingerprint = _fingerprint_text(deduped[idx].location)
+            if (
+                location_fingerprint == existing_location_fingerprint
+                or not location_fingerprint
+                or not existing_location_fingerprint
+            ):
+                duplicate_index = idx
+                break
+
+        if duplicate_index is not None:
+            if _event_quality_score(e) > _event_quality_score(deduped[duplicate_index]):
+                deduped[duplicate_index] = e
             continue
-        seen.add(key)
+
+        seen_by_base_key.setdefault(base_key, []).append(len(deduped))
         deduped.append(e)
+
     return deduped
 
 
@@ -277,6 +305,7 @@ def _events_signature(
     tz: ZoneInfo,
     events: List[Event],
     tomorrow_events: List[Event],
+    weather_alerts: List[WeatherAlert],
     header_date: str,
     sleep_banner: bool,
     wifi_status: str,
@@ -307,6 +336,7 @@ def _events_signature(
         "ups_status": ups_payload,
         "events": [_event_payload(e) for e in events],
         "tomorrow_events": [_event_payload(e) for e in tomorrow_events],
+        "weather_alerts": [a.headline for a in weather_alerts],
     }
     b = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(b).hexdigest()
@@ -350,13 +380,23 @@ def run_once(
     tomorrow_end = day_end + timedelta(days=1)
     events = _fetch_events_for_range(cfg, day_start, day_end, tz)
     tomorrow_events = _fetch_events_for_range(cfg, tomorrow_start, tomorrow_end, tz)
+    weather_resolver = WeatherForecastResolver(
+        timezone=cfg.timezone,
+        latitude=cfg.weather.latitude,
+        longitude=cfg.weather.longitude,
+    )
+    try:
+        weather_alerts = weather_resolver.active_alerts()
+    except Exception as e:
+        print(f"NWS alert lookup failed; continuing without alerts. Error: {e}")
+        weather_alerts = []
 
     # Render signature includes whether we show the sleep banner
     header_date = now.strftime("%A, %B %-d, %Y")
     show_banner = in_sleep and cfg.sleep.enabled
     wifi_status = get_wifi_status()
     ups_status = get_ups_status()
-    sig = _events_signature(tz, events, tomorrow_events, header_date, show_banner, wifi_status, ups_status)
+    sig = _events_signature(tz, events, tomorrow_events, weather_alerts, header_date, show_banner, wifi_status, ups_status)
     should_force_hourly = _should_force_hourly_refresh(state, now, timedelta(hours=1))
     print(
         f"Fetched {len(events)} events total; in_sleep={in_sleep}, show_banner={show_banner}, "
@@ -397,6 +437,7 @@ def run_once(
         wifi_status=wifi_status,
         ups_status=ups_status,
         tomorrow_events=tomorrow_events_with_weather,
+        weather_alerts=weather_alerts,
     )
 
     show_on_inky(img, rotate_degrees=cfg.display.rotate_degrees, border=cfg.display.border)

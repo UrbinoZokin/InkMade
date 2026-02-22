@@ -84,6 +84,7 @@ def test_events_signature_ignores_weather_fields():
         tz,
         [event_base],
         [],
+        [],
         "Thursday, February 5, 2026",
         False,
         "connected",
@@ -92,6 +93,7 @@ def test_events_signature_ignores_weather_fields():
     hash_with_weather = _events_signature(
         tz,
         [event_with_weather],
+        [],
         [],
         "Thursday, February 5, 2026",
         False,
@@ -194,3 +196,29 @@ def test_apply_weather_forecast_skips_end_weather_when_disabled(monkeypatch):
     assert processed[0].weather_text == "72°F"
     assert processed[0].weather_end_icon is None
     assert processed[0].weather_end_text is None
+
+
+def test_active_alerts_uses_headline_and_dedupes(monkeypatch):
+    resolver = WeatherForecastResolver("America/Phoenix", 33.4, -112.3)
+
+    class DummyResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return (
+                b'{"features": ['
+                b'{"properties": {"headline": "Flood Warning"}},'
+                b'{"properties": {"headline": "Flood Warning"}},'
+                b'{"properties": {"event": "Heat Advisory", "severity": "Moderate"}}'
+                b']}'
+            )
+
+    monkeypatch.setattr("inkycal.weather.urlopen", lambda *_args, **_kwargs: DummyResp())
+
+    alerts = resolver.active_alerts(limit=3)
+
+    assert [alert.headline for alert in alerts] == ["Flood Warning", "Moderate: Heat Advisory"]
