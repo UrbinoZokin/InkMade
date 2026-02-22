@@ -33,3 +33,9 @@ cd /opt/inkycal \
 git fetch origin \
 git reset --hard origin/main \
 chmod +x /opt/inkycal/scripts/update.sh
+
+## Bluetooth provisioning design (new)
+
+- GATT contract: `docs/bluetooth_provisioning_gatt.md`
+- Pi daemon skeleton: `src/inkycal/provisioning_daemon.py`
+- Flutter wizard flow + state machine: `docs/flutter_setup_wizard.md`, `examples/flutter/setup_wizard_state_machine.dart`
