@@ -15,6 +15,7 @@ class PairPinStep extends StatefulWidget {
 class _PairPinStepState extends State<PairPinStep> {
   final _formKey = GlobalKey<FormState>();
   final _pinController = TextEditingController();
+  bool _isCodeVisibleOnDevice = false;
 
   @override
   void dispose() {
@@ -36,6 +37,27 @@ class _PairPinStepState extends State<PairPinStep> {
         children: [
           StateChip(message: controller.lastDeviceState),
           const SizedBox(height: 16),
+          Text(
+            'Before entering the PIN, confirm the device screen is currently showing the 6-digit pairing code.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 8),
+          CheckboxListTile(
+            value: _isCodeVisibleOnDevice,
+            contentPadding: EdgeInsets.zero,
+            title: const Text('I can see the pairing code on the device screen'),
+            subtitle: const Text(
+              'If the code is missing, restart pairing on the device first.',
+            ),
+            onChanged: controller.isBusy
+                ? null
+                : (value) {
+                    setState(() {
+                      _isCodeVisibleOnDevice = value ?? false;
+                    });
+                  },
+          ),
+          const SizedBox(height: 8),
           Form(
             key: _formKey,
             child: SizedBox(
@@ -62,7 +84,7 @@ class _PairPinStepState extends State<PairPinStep> {
           Row(
             children: [
               FilledButton(
-                onPressed: controller.isBusy
+                onPressed: controller.isBusy || !_isCodeVisibleOnDevice
                     ? null
                     : () async {
                         if (!_formKey.currentState!.validate()) return;
