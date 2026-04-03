@@ -28,7 +28,8 @@ class _PairPinStepState extends State<PairPinStep> {
 
     return WizardScaffold(
       title: 'Enter pairing PIN',
-      subtitle: 'Type the setup PIN currently displayed on the e‑ink screen.',
+      subtitle: 'Enter the setup PIN shown on your display screen.',
+      nextStepHint: 'Next: Continue to Wi‑Fi after pairing succeeds.',
       error: controller.errorMessage,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -42,15 +43,15 @@ class _PairPinStepState extends State<PairPinStep> {
               child: TextFormField(
                 controller: _pinController,
                 decoration: const InputDecoration(
-                  labelText: '6-digit PIN',
+                  labelText: '6-digit setup PIN',
                   border: OutlineInputBorder(),
                 ),
                 keyboardType: TextInputType.number,
                 validator: (value) {
                   final text = (value ?? '').trim();
-                  if (text.length != 6) return 'PIN must be exactly 6 digits';
+                  if (text.length != 6) return 'Please enter exactly 6 digits.';
                   if (!RegExp(r'^\d{6}$').hasMatch(text)) {
-                    return 'PIN must contain only numbers';
+                    return 'PIN can only contain numbers.';
                   }
                   return null;
                 },
@@ -68,12 +69,12 @@ class _PairPinStepState extends State<PairPinStep> {
                         controller.formData.pin = _pinController.text.trim();
                         await controller.sendPairPin();
                       },
-                child: const Text('Send PIN'),
+                child: const Text('Pair Device'),
               ),
               const SizedBox(width: 8),
               OutlinedButton(
                 onPressed: controller.isBusy ? null : controller.nextStep,
-                child: const Text('Continue'),
+                child: const Text('Continue to Wi‑Fi'),
               ),
             ],
           ),

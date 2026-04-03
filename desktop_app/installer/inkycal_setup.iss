@@ -1,42 +1,53 @@
-; Inno Setup script for Inky Impressions Windows app.
-; Build Flutter first: flutter build windows --release
+; Inno Setup script for packaging the Flutter Windows app.
+; 1) Build app assets first with: flutter build windows --release
+; 2) Open this .iss file in Inno Setup Compiler and click Build.
 
-#define MyAppName "Inky Impressions Setup"
-#define MyAppVersion "0.1.0"
+; ------------------ RELEASE PLACEHOLDERS ------------------
+; TODO: Replace with your customer-facing app name.
+#define MyAppName "Inky Impressions"
+; TODO: Replace with your company / publisher name.
 #define MyAppPublisher "Your Company Name"
-#define MyAppExeName "inkycal_desktop_setup.exe"
+; TODO: Keep in sync with pubspec.yaml version.
+#define MyAppVersion "0.1.0"
+; TODO: Replace with your Windows executable name from build\\windows\\x64\\runner\\Release.
+#define MyAppExeName "desktop_app.exe"
+; TODO: Update if your Flutter build output path differs.
 #define MyAppSourceDir "..\\build\\windows\\x64\\runner\\Release"
+; TODO: Replace with your .ico file used for installer + shortcuts.
+#define MyInstallerIcon "..\\assets\\icons\\app_icon.ico"
 
 [Setup]
 AppId={{5C352F50-4D64-4A2D-90FE-EECDE6D218C9}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\{#MyAppName}
+DefaultDirName={autopf}\\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=.
-OutputBaseFilename=InkyImpressionsSetup_{#MyAppVersion}
+OutputBaseFilename=InkyImpressionsInstaller_{#MyAppVersion}
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
-UninstallDisplayIcon={app}\{#MyAppExeName}
-SetupIconFile=..\assets\icons\app_icon.ico
+UninstallDisplayIcon={app}\\{#MyAppExeName}
+SetupIconFile={#MyInstallerIcon}
+
+; Installer is fully wizard-driven (no command prompt required by end users).
+PrivilegesRequired=admin
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
-[Tasks]
-Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
-
 [Files]
-Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: "{#MyAppSourceDir}\\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+; Start Menu shortcut
+Name: "{group}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; IconFilename: "{#MyInstallerIcon}"
+; Desktop shortcut
+Name: "{autodesktop}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; IconFilename: "{#MyInstallerIcon}"
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent

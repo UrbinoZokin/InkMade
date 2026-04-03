@@ -30,7 +30,8 @@ class _ICloudStepState extends State<ICloudStep> {
 
     return WizardScaffold(
       title: 'iCloud CalDAV setup',
-      subtitle: 'Enter iCloud address and app-specific password.',
+      subtitle: 'Enter your iCloud email and app-specific password.',
+      nextStepHint: 'Next: Choose final device settings.',
       error: controller.errorMessage,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -51,9 +52,9 @@ class _ICloudStepState extends State<ICloudStep> {
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
-                        return 'Email is required';
+                        return 'Please enter your iCloud email address.';
                       }
-                      if (!value.contains('@')) return 'Enter a valid email';
+                      if (!value.contains('@')) return 'Please enter a valid email address.';
                       return null;
                     },
                   ),
@@ -67,7 +68,7 @@ class _ICloudStepState extends State<ICloudStep> {
                     validator: (value) {
                       final text = (value ?? '').trim();
                       if (!RegExp(r'^[a-zA-Z0-9-]{19,24}$').hasMatch(text)) {
-                        return 'Enter a valid app password';
+                        return 'Please enter a valid iCloud app password.';
                       }
                       return null;
                     },
@@ -89,12 +90,12 @@ class _ICloudStepState extends State<ICloudStep> {
                             _appPass.text.trim();
                         await controller.sendICloud();
                       },
-                child: const Text('Send iCloud Credentials'),
+                child: const Text('Save iCloud Details'),
               ),
               const SizedBox(width: 8),
               OutlinedButton(
                 onPressed: controller.isBusy ? null : controller.nextStep,
-                child: const Text('Continue'),
+                child: const Text('Continue to Device Settings'),
               ),
             ],
           ),

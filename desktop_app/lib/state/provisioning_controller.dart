@@ -44,7 +44,7 @@ class ProvisioningController extends ChangeNotifier {
         notifyListeners();
       },
       onError: (error) {
-        errorMessage = 'BLE scan failed: $error';
+        errorMessage = 'We could not scan for nearby devices. Please check Bluetooth and try again. ($error)';
         notifyListeners();
       },
     );
@@ -62,7 +62,7 @@ class ProvisioningController extends ChangeNotifier {
       });
       currentStep = WizardStep.pairPin;
     } catch (error) {
-      errorMessage = 'Connection failed: $error';
+      errorMessage = 'We could not connect to that device. Make sure it is powered on and nearby, then try again. ($error)';
     } finally {
       _setBusy(false);
     }
@@ -111,7 +111,7 @@ class ProvisioningController extends ChangeNotifier {
       await _bleService.sendCommand(command);
     } catch (error) {
       _log.warning('sendCommand failed: $error');
-      errorMessage = '$error';
+      errorMessage = 'Something went wrong while sending this step to the device. Please try again. ($error)';
     } finally {
       _setBusy(false);
     }

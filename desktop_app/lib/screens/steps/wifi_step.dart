@@ -30,7 +30,8 @@ class _WifiStepState extends State<WifiStep> {
 
     return WizardScaffold(
       title: 'Configure Wi‑Fi',
-      subtitle: 'Provide the Wi‑Fi network credentials for the Raspberry Pi.',
+      subtitle: 'Enter the Wi‑Fi network your device should use.',
+      nextStepHint: 'Next: Link your calendar accounts.',
       error: controller.errorMessage,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -50,7 +51,7 @@ class _WifiStepState extends State<WifiStep> {
                       border: OutlineInputBorder(),
                     ),
                     validator: (value) => (value == null || value.trim().isEmpty)
-                        ? 'SSID is required'
+                        ? 'Please enter your Wi‑Fi network name.'
                         : null,
                   ),
                   const SizedBox(height: 12),
@@ -63,7 +64,7 @@ class _WifiStepState extends State<WifiStep> {
                     obscureText: true,
                     validator: (value) {
                       if ((value ?? '').length < 8) {
-                        return 'Password must be at least 8 characters';
+                        return 'Password must be at least 8 characters long.';
                       }
                       return null;
                     },
@@ -84,12 +85,12 @@ class _WifiStepState extends State<WifiStep> {
                         controller.formData.wifiPassword = _pass.text;
                         await controller.sendWifi();
                       },
-                child: const Text('Send Wi‑Fi Credentials'),
+                child: const Text('Save Wi‑Fi on Device'),
               ),
               const SizedBox(width: 8),
               OutlinedButton(
                 onPressed: controller.isBusy ? null : controller.nextStep,
-                child: const Text('Continue'),
+                child: const Text('Continue to Google Setup'),
               ),
             ],
           ),

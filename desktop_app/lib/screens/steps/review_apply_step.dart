@@ -16,7 +16,8 @@ class ReviewApplyStep extends StatelessWidget {
     return WizardScaffold(
       title: 'Review and apply',
       subtitle:
-          'Confirm your settings, then apply and restart relevant services.',
+          'Review your choices, then apply setup to finish.',
+      nextStepHint: 'Final step: Click apply and wait for confirmation.',
       error: controller.errorMessage,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -45,7 +46,7 @@ class ReviewApplyStep extends StatelessWidget {
           FilledButton.icon(
             onPressed: controller.isBusy ? null : controller.apply,
             icon: const Icon(Icons.check_circle_outline),
-            label: const Text('Apply Configuration'),
+            label: const Text('Apply Setup and Finish'),
           ),
         ],
       ),

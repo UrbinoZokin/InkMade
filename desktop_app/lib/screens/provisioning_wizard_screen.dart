@@ -21,17 +21,26 @@ class ProvisioningWizardScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Inky Impressions Setup Wizard'),
+        actions: [
+          TextButton.icon(
+            onPressed: () => _showAboutHelp(context),
+            icon: const Icon(Icons.help_outline),
+            label: const Text('About / Help'),
+          ),
+          const SizedBox(width: 12),
+        ],
       ),
       body: Row(
         children: [
           SizedBox(
-            width: 260,
+            width: 300,
             child: Stepper(
               currentStep: controller.currentStep.index,
               controlsBuilder: (_, __) => const SizedBox.shrink(),
               steps: WizardStep.values
                   .map((step) => Step(
                         title: Text(_titleFor(step)),
+                        subtitle: Text(_subtitleFor(step)),
                         content: const SizedBox.shrink(),
                         isActive: controller.currentStep.index >= step.index,
                       ))
@@ -67,19 +76,65 @@ class ProvisioningWizardScreen extends StatelessWidget {
   String _titleFor(WizardStep step) {
     switch (step) {
       case WizardStep.scanConnect:
-        return 'Scan & Connect';
+        return '1) Find Device';
       case WizardStep.pairPin:
-        return 'Pair PIN';
+        return '2) Confirm Pairing Code';
       case WizardStep.wifi:
-        return 'Wi‑Fi';
+        return '3) Connect to Wi‑Fi';
       case WizardStep.googleAuth:
-        return 'Google Auth';
+        return '4) Link Google Calendar';
       case WizardStep.icloud:
-        return 'iCloud';
+        return '5) Link iCloud Calendar';
       case WizardStep.deviceSettings:
-        return 'Device Settings';
+        return '6) Choose Device Settings';
       case WizardStep.reviewApply:
-        return 'Review & Apply';
+        return '7) Review and Finish';
     }
+  }
+
+  String _subtitleFor(WizardStep step) {
+    switch (step) {
+      case WizardStep.scanConnect:
+        return 'Power on and connect';
+      case WizardStep.pairPin:
+        return 'Enter the 6-digit PIN';
+      case WizardStep.wifi:
+        return 'Send home network details';
+      case WizardStep.googleAuth:
+        return 'Optional calendar link';
+      case WizardStep.icloud:
+        return 'Optional calendar link';
+      case WizardStep.deviceSettings:
+        return 'Timezone and refresh settings';
+      case WizardStep.reviewApply:
+        return 'Apply configuration to device';
+    }
+  }
+
+  void _showAboutHelp(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('About Inky Impressions Setup'),
+        content: const SingleChildScrollView(
+          child: Text(
+            'This app helps you set up your Inky Impressions display over Bluetooth.\n\n'
+            'You will go step-by-step to:\n'
+            '• connect to your device\n'
+            '• enter Wi‑Fi details\n'
+            '• link calendar providers\n'
+            '• set timezone and refresh options\n'
+            '• apply everything to the device\n\n'
+            'If you see an error, keep the device powered on, stay within Bluetooth range, and try the current step again.',
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
   }
 }

@@ -27,7 +27,8 @@ class _ScanConnectStepState extends State<ScanConnectStep> {
 
     return WizardScaffold(
       title: 'Find your InkyCal device',
-      subtitle: 'Make sure the display is powered on and within BLE range.',
+      subtitle: 'Make sure your display is powered on and nearby.',
+      nextStepHint: 'Next: Connect to your device to continue.',
       error: controller.errorMessage,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -39,10 +40,10 @@ class _ScanConnectStepState extends State<ScanConnectStep> {
                     ? null
                     : () => controller.startScan(),
                 icon: const Icon(Icons.refresh),
-                label: const Text('Rescan'),
+                label: const Text('Search Again'),
               ),
               const SizedBox(width: 8),
-              Text('${controller.scannedDevices.length} device(s) found'),
+              Text('${controller.scannedDevices.length} device(s) found nearby'),
             ],
           ),
           const SizedBox(height: 16),
@@ -60,7 +61,7 @@ class _ScanConnectStepState extends State<ScanConnectStep> {
                     onPressed: controller.isBusy
                         ? null
                         : () => controller.connectToDevice(d),
-                    child: const Text('Connect'),
+                    child: const Text('Connect to This Device'),
                   ),
                 );
               },

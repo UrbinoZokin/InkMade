@@ -7,12 +7,14 @@ class WizardScaffold extends StatelessWidget {
     required this.subtitle,
     required this.child,
     this.error,
+    this.nextStepHint,
   });
 
   final String title;
   final String subtitle;
   final Widget child;
   final String? error;
+  final String? nextStepHint;
 
   @override
   Widget build(BuildContext context) {
@@ -24,6 +26,16 @@ class WizardScaffold extends StatelessWidget {
           Text(title, style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 8),
           Text(subtitle),
+          if (nextStepHint != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              nextStepHint!,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ],
           if (error != null) ...[
             const SizedBox(height: 12),
             Card(
