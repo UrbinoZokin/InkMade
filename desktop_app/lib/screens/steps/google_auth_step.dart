@@ -16,7 +16,8 @@ class GoogleAuthStep extends StatelessWidget {
     return WizardScaffold(
       title: 'Google Calendar authorization',
       subtitle:
-          'Start Device Flow. Complete verification on another browser/device.',
+          'Link Google Calendar using the on-screen code and link below.',
+      nextStepHint: 'Next: Optionally link iCloud, then continue.',
       error: controller.errorMessage,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -47,17 +48,17 @@ class GoogleAuthStep extends StatelessWidget {
                 onPressed: controller.isBusy
                     ? null
                     : controller.startGoogleDeviceFlow,
-                child: const Text('Start Device Flow'),
+                child: const Text('Start Google Sign-In'),
               ),
               OutlinedButton(
                 onPressed: controller.isBusy
                     ? null
                     : controller.cancelGoogleDeviceFlow,
-                child: const Text('Cancel Device Flow'),
+                child: const Text('Cancel Google Sign-In'),
               ),
               OutlinedButton(
                 onPressed: controller.isBusy ? null : controller.nextStep,
-                child: const Text('Continue'),
+                child: const Text('Continue to iCloud Setup'),
               ),
             ],
           ),

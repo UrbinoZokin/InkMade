@@ -74,26 +74,42 @@ Main output directory:
 
 ## Package as double-click installer (Inno Setup)
 
-1. Install **Inno Setup 6** on Windows.
-2. Build Flutter release output.
-3. Open `installer/inkycal_setup.iss` in Inno Setup Compiler.
-4. Update constants at top of script and paths if needed.
-5. Click **Build**.
+This flow is designed so your end users only double-click an installer (no command prompt needed).
 
-Generated installer behavior:
-- Standard wizard UI for non-technical users.
-- Installs under Program Files by default.
-- Creates:
-  - Desktop shortcut
-  - Start Menu shortcut
-- Includes uninstaller entry.
+### Exact packaging steps (from Flutter build to distributable `.exe`)
+
+1. Build the Windows app output:
+   ```powershell
+   flutter build windows --release
+   ```
+2. Install and open **Inno Setup 6 Compiler**.
+3. Open `installer/inkycal_setup.iss`.
+4. Update the placeholders at the top of the script:
+   - `MyAppName`
+   - `MyAppPublisher`
+   - `MyAppVersion`
+   - `MyAppExeName`
+   - `MyInstallerIcon`
+5. In Inno Setup Compiler, click **Build** (or press **F9**).
+6. The distributable installer executable is produced in:
+   - `desktop_app/installer/InkyImpressionsInstaller_<version>.exe`
+
+### What the installer automatically provides
+
+- Wizard-based install experience suitable for non-technical users.
+- Install location under Program Files.
+- Start Menu shortcut.
+- Desktop shortcut.
+- Windows “Apps & features” uninstaller entry.
+- Optional launch at installer completion.
 
 ## First-run UX notes
 
 - Wizard is linear and includes clear labels for each setup phase.
 - Each form has validation before sending BLE commands.
 - Device status chip shows latest BLE `STATE` update.
-- Errors are surfaced in-page (no terminal needed).
+- Errors are surfaced in-page with friendly recovery guidance (no terminal needed).
+- App bar includes an **About / Help** section that explains the full setup flow.
 
 ## Pi-side integration checklist
 

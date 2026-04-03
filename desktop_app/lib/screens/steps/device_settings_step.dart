@@ -39,7 +39,8 @@ class _DeviceSettingsStepState extends State<DeviceSettingsStep> {
 
     return WizardScaffold(
       title: 'Device settings',
-      subtitle: 'Set timezone, sleep window, rotation, and refresh schedule.',
+      subtitle: 'Choose timezone, sleep schedule, and refresh behavior.',
+      nextStepHint: 'Next: Review everything and apply to the device.',
       error: controller.errorMessage,
       child: SingleChildScrollView(
         child: Form(
@@ -55,7 +56,7 @@ class _DeviceSettingsStepState extends State<DeviceSettingsStep> {
                     border: OutlineInputBorder(),
                   ),
                   validator: (v) => (v == null || !v.contains('/'))
-                      ? 'Use format Area/City'
+                      ? 'Use timezone format Area/City (example: America/Phoenix).' 
                       : null,
                 ),
                 const SizedBox(height: 12),
@@ -67,7 +68,7 @@ class _DeviceSettingsStepState extends State<DeviceSettingsStep> {
                   ),
                   validator: (v) => _isTime((v ?? '').trim())
                       ? null
-                      : 'Use 24-hour HH:mm format',
+                      : 'Use 24-hour time format HH:mm.',
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
@@ -78,7 +79,7 @@ class _DeviceSettingsStepState extends State<DeviceSettingsStep> {
                   ),
                   validator: (v) => _isTime((v ?? '').trim())
                       ? null
-                      : 'Use 24-hour HH:mm format',
+                      : 'Use 24-hour time format HH:mm.',
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
@@ -106,7 +107,7 @@ class _DeviceSettingsStepState extends State<DeviceSettingsStep> {
                   validator: (v) {
                     final n = int.tryParse((v ?? '').trim());
                     if (n == null || n < 1 || n > 240) {
-                      return 'Enter 1 to 240 minutes';
+                      return 'Please enter a value from 1 to 240 minutes.';
                     }
                     return null;
                   },
@@ -119,7 +120,7 @@ class _DeviceSettingsStepState extends State<DeviceSettingsStep> {
                     border: OutlineInputBorder(),
                   ),
                   validator: (v) => (v == null || v.trim().split(' ').length < 5)
-                      ? 'Use a 5-field cron expression'
+                      ? 'Please enter a 5-field cron expression.'
                       : null,
                 ),
                 const SizedBox(height: 12),
@@ -141,12 +142,12 @@ class _DeviceSettingsStepState extends State<DeviceSettingsStep> {
                               );
                               await controller.sendSettings();
                             },
-                      child: const Text('Save Settings to Device'),
+                      child: const Text('Save Settings on Device'),
                     ),
                     const SizedBox(width: 8),
                     OutlinedButton(
                       onPressed: controller.isBusy ? null : controller.nextStep,
-                      child: const Text('Continue'),
+                      child: const Text('Continue to Review'),
                     ),
                   ],
                 ),
