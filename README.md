@@ -30,6 +30,7 @@ For production use in Google Cloud Console:
 OAuth loopback troubleshooting:
 - If your browser fails on `localhost:<port>`, force IPv4 loopback: `GOOGLE_OAUTH_HOST=127.0.0.1`.
 - If needed, set bind explicitly too: `GOOGLE_OAUTH_BIND_ADDR=127.0.0.1`.
+- Avoid private LAN IPs (for example `192.168.x.x`) for callback host/bind; Google may reject with `device_id and device_name are required for private IP`.
 - For remote auth over SSH tunneling, use a fixed `GOOGLE_OAUTH_PORT` and forward that same port.
 
 ### Features
