@@ -235,6 +235,31 @@ def _process_events(events: List[Event], travel_enabled: bool, origin_address: s
     return processed
 
 
+def _clip_events_to_range(events: List[Event], range_start: datetime, range_end: datetime) -> List[Event]:
+    clipped: List[Event] = []
+    for event in events:
+        if event.end <= range_start or event.start >= range_end:
+            continue
+
+        clipped_start = max(event.start, range_start)
+        clipped_end = min(event.end, range_end)
+        if clipped_end <= clipped_start:
+            continue
+
+        clipped.append(
+            Event(
+                source=event.source,
+                title=event.title,
+                start=clipped_start,
+                end=clipped_end,
+                all_day=event.all_day,
+                location=event.location,
+            )
+        )
+
+    return clipped
+
+
 def _fetch_events_for_range(cfg, range_start: datetime, range_end: datetime, tz: ZoneInfo) -> List[Event]:
     events: List[Event] = []
     if cfg.google.enabled:
@@ -257,8 +282,10 @@ def _fetch_events_for_range(cfg, range_start: datetime, range_end: datetime, tz:
         except Exception as e:
             print(f"iCloud fetch failed; continuing without iCloud. Error: {e}")
 
+    range_events = _clip_events_to_range(events, range_start, range_end)
+
     return _process_events(
-        events,
+        range_events,
         travel_enabled=cfg.travel.enabled,
         origin_address=cfg.travel.origin_address,
         back_to_back_window_minutes=cfg.travel.back_to_back_window_minutes,
