@@ -10,6 +10,23 @@ Quick weather report for long events:
 PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather-report
 ```
 
+Generate/refresh Google OAuth token from CLI:
+
+```bash
+PYTHONPATH=src python -m inkycal.main \
+  --google-oauth-init \
+  --google-credentials /opt/inkycal/secrets/google_credentials.json \
+  --google-token /opt/inkycal/secrets/google_token.json
+```
+
+For production use in Google Cloud Console:
+
+1. OAuth consent screen should be **In production**.
+2. Create an **OAuth client ID** of type **Desktop app**.
+3. Download the client JSON to your credentials path.
+4. Run the command above (use `GOOGLE_OAUTH_PORT=8080` if you need fixed SSH port forwarding).
+5. Set `GOOGLE_CREDENTIALS_JSON` and `GOOGLE_TOKEN_JSON` in your `.env`.
+
 ### Features
 
 - Google Calendar + Apple iCloud (CalDAV) sync  
