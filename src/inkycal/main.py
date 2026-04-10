@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-from .calendar_google import fetch_google_events
+from .calendar_google import ensure_google_token, fetch_google_events
 from .calendar_icloud import fetch_icloud_events
 from .config import load_config
 from .display_inky import show_on_inky
@@ -488,7 +488,20 @@ def main():
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--deep-clean", action="store_true")
     ap.add_argument("--long-events-weather-report", action="store_true")
+    ap.add_argument("--google-oauth-init", action="store_true")
+    ap.add_argument("--google-credentials", default=os.environ.get("GOOGLE_CREDENTIALS_JSON", ""))
+    ap.add_argument("--google-token", default=os.environ.get("GOOGLE_TOKEN_JSON", ""))
     args = ap.parse_args()
+
+    if args.google_oauth_init:
+        if not args.google_credentials or not args.google_token:
+            raise SystemExit(
+                "--google-oauth-init requires --google-credentials and --google-token "
+                "(or GOOGLE_CREDENTIALS_JSON/GOOGLE_TOKEN_JSON env vars)."
+            )
+        ensure_google_token(args.google_credentials, args.google_token)
+        print(f"Google OAuth token ready at: {args.google_token}")
+        return
 
     if args.long_events_weather_report:
         print_long_events_weather_report(config_path=args.config)

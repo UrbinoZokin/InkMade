@@ -49,6 +49,10 @@ def _get_creds(credentials_path: str, token_path: str) -> Credentials:
         f.write(creds.to_json())
     return creds
 
+
+def ensure_google_token(credentials_path: str, token_path: str) -> None:
+    _get_creds(credentials_path, token_path)
+
 def fetch_google_events(
     calendar_ids: List[str],
     day_start: datetime,
