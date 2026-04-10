@@ -20,21 +20,30 @@ def _get_creds(credentials_path: str, token_path: str) -> Credentials:
             credentials_path,
             SCOPES,
         )
-        # REQUIRED for headless/manual auth
-    flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+    # OOB redirect flow is deprecated/blocked by Google.
+    # Google installed-app OAuth requires loopback redirect URIs.
+    oauth_host = "localhost"
+    oauth_bind_addr = "127.0.0.1"
+    oauth_port = int(os.environ.get("GOOGLE_OAUTH_PORT", "0"))
 
-    auth_url, _ = flow.authorization_url(
-        access_type="offline",
-        prompt="consent"
-    )
     print("\n" + "=" * 60)
     print("GOOGLE AUTHORIZATION REQUIRED")
-    print("Open this URL in a browser on any device:")
-    print(auth_url)
+    print("This opens a temporary local callback server for OAuth.")
+    print(f"Callback host: {oauth_host} (bind: {oauth_bind_addr}, port: {oauth_port})")
+    print(
+        "If authorizing from another device, use SSH port-forwarding with a fixed "
+        "GOOGLE_OAUTH_PORT (for example: ssh -L 8080:127.0.0.1:8080 <pi-host>)."
+    )
     print("=" * 60 + "\n")
-    code = input("Enter the authorization code here: ").strip()
-    flow.fetch_token(code=code)
-    creds = flow.credentials
+
+    creds = flow.run_local_server(
+        host=oauth_host,
+        bind_addr=oauth_bind_addr,
+        port=oauth_port,
+        open_browser=False,
+        access_type="offline",
+        prompt="consent",
+    )
     os.makedirs(os.path.dirname(token_path), exist_ok=True)
     with open(token_path, "w", encoding="utf-8") as f:
         f.write(creds.to_json())
