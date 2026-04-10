@@ -2,6 +2,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List
 from zoneinfo import ZoneInfo
+import ipaddress
 import os
 
 from google.oauth2.credentials import Credentials
@@ -11,6 +12,13 @@ from googleapiclient.discovery import build
 from .models import Event
 
 SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+
+def _is_private_ip(value: str) -> bool:
+    try:
+        return ipaddress.ip_address(value).is_private
+    except ValueError:
+        return False
+
 
 def _get_creds(credentials_path: str, token_path: str) -> Credentials:
     if os.path.exists(token_path):
@@ -25,6 +33,20 @@ def _get_creds(credentials_path: str, token_path: str) -> Credentials:
     oauth_host = os.environ.get("GOOGLE_OAUTH_HOST", "127.0.0.1")
     oauth_bind_addr = os.environ.get("GOOGLE_OAUTH_BIND_ADDR", oauth_host)
     oauth_port = int(os.environ.get("GOOGLE_OAUTH_PORT", "0"))
+
+    if _is_private_ip(oauth_host):
+        print(
+            "GOOGLE_OAUTH_HOST is a private IP address. "
+            "Google installed-app OAuth requires loopback host values "
+            "(127.0.0.1 or localhost). Falling back to 127.0.0.1."
+        )
+        oauth_host = "127.0.0.1"
+    if _is_private_ip(oauth_bind_addr):
+        print(
+            "GOOGLE_OAUTH_BIND_ADDR is a private IP address. "
+            "Falling back to 127.0.0.1 for local callback binding."
+        )
+        oauth_bind_addr = "127.0.0.1"
 
     print("\n" + "=" * 60)
     print("GOOGLE AUTHORIZATION REQUIRED")
