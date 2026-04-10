@@ -21,10 +21,25 @@ def _get_creds(credentials_path: str, token_path: str) -> Credentials:
             SCOPES,
         )
     # OOB redirect flow is deprecated/blocked by Google.
-    # Use loopback redirect with local server authorization instead.
+    # Use local-server authorization with a configurable callback host.
+    oauth_host = os.environ.get("GOOGLE_OAUTH_HOST", "127.0.0.1")
+    oauth_bind_addr = os.environ.get("GOOGLE_OAUTH_BIND_ADDR", oauth_host)
+    oauth_port = int(os.environ.get("GOOGLE_OAUTH_PORT", "0"))
+
+    print("\n" + "=" * 60)
+    print("GOOGLE AUTHORIZATION REQUIRED")
+    print("This opens a temporary local callback server for OAuth.")
+    print(f"Callback host: {oauth_host} (bind: {oauth_bind_addr}, port: {oauth_port})")
+    print(
+        "If authorizing from another device, set GOOGLE_OAUTH_HOST to this machine's "
+        "LAN IP and GOOGLE_OAUTH_BIND_ADDR=0.0.0.0 in your .env."
+    )
+    print("=" * 60 + "\n")
+
     creds = flow.run_local_server(
-        host="127.0.0.1",
-        port=0,
+        host=oauth_host,
+        bind_addr=oauth_bind_addr,
+        port=oauth_port,
         open_browser=False,
         access_type="offline",
         prompt="consent",
