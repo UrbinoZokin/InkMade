@@ -20,21 +20,15 @@ def _get_creds(credentials_path: str, token_path: str) -> Credentials:
             credentials_path,
             SCOPES,
         )
-        # REQUIRED for headless/manual auth
-    flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
-
-    auth_url, _ = flow.authorization_url(
+    # OOB redirect flow is deprecated/blocked by Google.
+    # Use loopback redirect with local server authorization instead.
+    creds = flow.run_local_server(
+        host="127.0.0.1",
+        port=0,
+        open_browser=False,
         access_type="offline",
-        prompt="consent"
+        prompt="consent",
     )
-    print("\n" + "=" * 60)
-    print("GOOGLE AUTHORIZATION REQUIRED")
-    print("Open this URL in a browser on any device:")
-    print(auth_url)
-    print("=" * 60 + "\n")
-    code = input("Enter the authorization code here: ").strip()
-    flow.fetch_token(code=code)
-    creds = flow.credentials
     os.makedirs(os.path.dirname(token_path), exist_ok=True)
     with open(token_path, "w", encoding="utf-8") as f:
         f.write(creds.to_json())
