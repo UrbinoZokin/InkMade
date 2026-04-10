@@ -27,6 +27,11 @@ For production use in Google Cloud Console:
 4. Run the command above (use `GOOGLE_OAUTH_PORT=8080` if you need fixed SSH port forwarding).
 5. Set `GOOGLE_CREDENTIALS_JSON` and `GOOGLE_TOKEN_JSON` in your `.env`.
 
+OAuth loopback troubleshooting:
+- If your browser fails on `localhost:<port>`, force IPv4 loopback: `GOOGLE_OAUTH_HOST=127.0.0.1`.
+- If needed, set bind explicitly too: `GOOGLE_OAUTH_BIND_ADDR=127.0.0.1`.
+- For remote auth over SSH tunneling, use a fixed `GOOGLE_OAUTH_PORT` and forward that same port.
+
 ### Features
 
 - Google Calendar + Apple iCloud (CalDAV) sync  

@@ -22,14 +22,15 @@ def _get_creds(credentials_path: str, token_path: str) -> Credentials:
         )
     # OOB redirect flow is deprecated/blocked by Google.
     # Google installed-app OAuth requires loopback redirect URIs.
-    oauth_host = "localhost"
-    oauth_bind_addr = "127.0.0.1"
+    oauth_host = os.environ.get("GOOGLE_OAUTH_HOST", "127.0.0.1")
+    oauth_bind_addr = os.environ.get("GOOGLE_OAUTH_BIND_ADDR", oauth_host)
     oauth_port = int(os.environ.get("GOOGLE_OAUTH_PORT", "0"))
 
     print("\n" + "=" * 60)
     print("GOOGLE AUTHORIZATION REQUIRED")
     print("This opens a temporary local callback server for OAuth.")
     print(f"Callback host: {oauth_host} (bind: {oauth_bind_addr}, port: {oauth_port})")
+    print("Tip: keep host and bind address aligned (default 127.0.0.1) to avoid IPv6 localhost mismatches.")
     print(
         "If authorizing from another device, use SSH port-forwarding with a fixed "
         "GOOGLE_OAUTH_PORT (for example: ssh -L 8080:127.0.0.1:8080 <pi-host>)."
