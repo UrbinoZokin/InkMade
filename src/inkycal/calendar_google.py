@@ -4,51 +4,61 @@ from typing import List
 from zoneinfo import ZoneInfo
 import os
 
+from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 from .models import Event
 
 SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 
-def _get_creds(credentials_path: str, token_path: str) -> Credentials:
-    if os.path.exists(token_path):
-        return Credentials.from_authorized_user_file(token_path, SCOPES)
 
-    flow = InstalledAppFlow.from_client_secrets_file(
-            credentials_path,
-            SCOPES,
+class GoogleAuthError(RuntimeError):
+    """Raised when the Google token file is missing or cannot be refreshed."""
+
+
+def _load_creds(token_path: str) -> Credentials:
+    # The interactive OAuth flow runs off-device (scripts/google_auth.py) and
+    # produces token_path. The Pi only reads that file and refreshes the
+    # access token using the stored refresh_token; it never prompts a user.
+    if not token_path or not os.path.exists(token_path):
+        raise GoogleAuthError(
+            f"Google token file not found at '{token_path}'. "
+            "Generate it off-device with scripts/google_auth.py and copy it here."
         )
-        # REQUIRED for headless/manual auth
-    flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
 
-    auth_url, _ = flow.authorization_url(
-        access_type="offline",
-        prompt="consent"
+    creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+
+    if creds.valid:
+        return creds
+
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+        _persist_token(token_path, creds)
+        return creds
+
+    raise GoogleAuthError(
+        f"Google token at '{token_path}' is invalid and cannot be refreshed. "
+        "Re-run scripts/google_auth.py off-device to regenerate it."
     )
-    print("\n" + "=" * 60)
-    print("GOOGLE AUTHORIZATION REQUIRED")
-    print("Open this URL in a browser on any device:")
-    print(auth_url)
-    print("=" * 60 + "\n")
-    code = input("Enter the authorization code here: ").strip()
-    flow.fetch_token(code=code)
-    creds = flow.credentials
-    os.makedirs(os.path.dirname(token_path), exist_ok=True)
+
+
+def _persist_token(token_path: str, creds: Credentials) -> None:
+    parent = os.path.dirname(token_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     with open(token_path, "w", encoding="utf-8") as f:
         f.write(creds.to_json())
-    return creds
+
 
 def fetch_google_events(
     calendar_ids: List[str],
     day_start: datetime,
     day_end: datetime,
     tz: ZoneInfo,
-    credentials_path: str,
     token_path: str,
 ) -> List[Event]:
-    creds = _get_creds(credentials_path, token_path)
+    creds = _load_creds(token_path)
     service = build("calendar", "v3", credentials=creds, cache_discovery=False)
 
     events: List[Event] = []
@@ -71,9 +81,7 @@ def fetch_google_events(
             start_obj = item.get("start", {})
             end_obj = item.get("end", {})
 
-            # All-day events have "date" not "dateTime"
             if "date" in start_obj:
-                # Interpret as local midnight range
                 start = datetime.fromisoformat(start_obj["date"]).replace(tzinfo=tz)
                 end = datetime.fromisoformat(end_obj["date"]).replace(tzinfo=tz)
                 all_day = True

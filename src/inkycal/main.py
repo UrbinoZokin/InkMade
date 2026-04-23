@@ -238,13 +238,14 @@ def _process_events(events: List[Event], travel_enabled: bool, origin_address: s
 def _fetch_events_for_range(cfg, range_start: datetime, range_end: datetime, tz: ZoneInfo) -> List[Event]:
     events: List[Event] = []
     if cfg.google.enabled:
-        creds_path = os.environ.get("GOOGLE_CREDENTIALS_JSON", "")
         token_path = os.environ.get("GOOGLE_TOKEN_JSON", "")
-        if creds_path and token_path:
+        if token_path:
             try:
-                events.extend(fetch_google_events(cfg.google.calendar_ids, range_start, range_end, tz, creds_path, token_path))
+                events.extend(fetch_google_events(cfg.google.calendar_ids, range_start, range_end, tz, token_path))
             except Exception as e:
                 print(f"Google Calendar fetch failed; continuing without Google events. Error: {e}")
+        else:
+            print("Google enabled but GOOGLE_TOKEN_JSON not set; skipping Google. Generate it off-device with scripts/google_auth.py.")
 
     if cfg.icloud.enabled:
         try:

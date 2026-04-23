@@ -634,12 +634,19 @@ def _format_ups_status(ups_status: Optional[dict]) -> Optional[str]:
         ups_status.get("battery_percent")
         or ups_status.get("battery_percentage")
         or ups_status.get("battery")
+        or ups_status.get("percent")
+        or ups_status.get("capacity")
     )
-    power_source = (
-        ups_status.get("power_source")
-        or ups_status.get("source")
-        or ups_status.get("status")
-    )
+    power_source = ups_status.get("power_source") or ups_status.get("source")
+    if not power_source:
+        status = str(ups_status.get("status") or "").strip().lower()
+        if status == "discharging":
+            power_source = "battery"
+        elif status in {"charging", "full", "not charging"}:
+            power_source = "external"
+        elif status:
+            power_source = status
+
     if percent_value is None or not power_source:
         return None
 

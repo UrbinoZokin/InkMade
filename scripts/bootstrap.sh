@@ -22,11 +22,10 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   echo "Updating existing repo..."
   cd "$INSTALL_DIR"
   git fetch --all
-  git reset --hard main
-  
+  git reset --hard origin/main
 else
   echo "Cloning repo..."
-  git clone -b Calendar_debugging "$REPO_URL" "$INSTALL_DIR"
+  git clone -b main "$REPO_URL" "$INSTALL_DIR"
   cd "$INSTALL_DIR"
 fi
 
