@@ -14,12 +14,43 @@ Run this on each OS you want to ship for; PyInstaller does not cross-compile.
 """
 from __future__ import annotations
 
+import sys
+
 import PyInstaller.__main__
 
 APP_NAME = "InkyCal-Setup"
 
 
+def _bleak_backend_submodules() -> list[str]:
+    """Collect only the BLE backend for the platform we're building on.
+
+    bleak ships backends for Windows (winrt), macOS (corebluetooth) and
+    Linux (bluezdbus). Collecting *all* of them (``--collect-submodules
+    bleak``) makes PyInstaller import the foreign backends, which fails on
+    the build host -- e.g. corebluetooth needs pyobjc (``objc``) and emits
+    a warning on Windows/Linux. We only need the current platform's backend.
+    """
+    if sys.platform == "win32":
+        pkg = "bleak.backends.winrt"
+    elif sys.platform == "darwin":
+        pkg = "bleak.backends.corebluetooth"
+    else:
+        pkg = "bleak.backends.bluezdbus"
+    try:
+        from PyInstaller.utils.hooks import collect_submodules
+        return collect_submodules(pkg)
+    except Exception:
+        return [pkg]
+
+
 def build() -> None:
+    hidden_imports = [
+        "bleak",
+        "bleak.backends",
+        *_bleak_backend_submodules(),
+        "inkycal_companion.cli",
+        "inkycal_companion.gui",
+    ]
     args = [
         "inkycal_companion/__main__.py",
         "--name", APP_NAME,
@@ -27,14 +58,12 @@ def build() -> None:
         "--windowed",            # no console window for the GUI
         "--noconfirm",
         "--clean",
-        # bleak / zeroconf pull in platform backends via dynamic imports;
-        # collect them so the frozen build can find them.
-        "--collect-submodules", "bleak",
+        # zeroconf has dynamically-imported / compiled submodules; collect them.
         "--collect-submodules", "zeroconf",
         "--collect-submodules", "google_auth_oauthlib",
-        "--hidden-import", "inkycal_companion.cli",
-        "--hidden-import", "inkycal_companion.gui",
     ]
+    for mod in hidden_imports:
+        args += ["--hidden-import", mod]
     PyInstaller.__main__.run(args)
 
 
