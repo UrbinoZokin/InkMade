@@ -26,5 +26,9 @@ STATUS_CONNECTING = "connecting"
 STATUS_CONNECTED = "connected"
 STATUS_FAILED = "failed"
 
-# OAuth scope the Pi's display program needs (read-only calendar access).
-GOOGLE_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+# OAuth scopes the Pi's display program needs: read-only calendar access plus
+# read-only Google Tasks (rendered as the "Reminders" region).
+GOOGLE_SCOPES = [
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/tasks.readonly",
+]

@@ -13,6 +13,7 @@ PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather
 ### Features
 
 - Google Calendar + Apple iCloud (CalDAV) sync  
+- Google Tasks shown as a separate “Reminders” region (due today + overdue)  
 - Sorted by start time (all-day events first)  
 - Portrait layout for 13.3" display  
 - Updates every 15 minutes  
@@ -77,6 +78,13 @@ The Pi runs headless, so the OAuth consent flow happens on another machine.
 2. Copy `google_token.json` to the Pi at the path referenced by
    `GOOGLE_TOKEN_JSON` in `/opt/inkycal/.env`
    (default: `/opt/inkycal/secrets/google_token.json`).
+
+> **Reminders / Google Tasks:** the token now requests both
+> `calendar.readonly` and `tasks.readonly`. If you generated your token before
+> Tasks support was added, re-run the sign-in flow (companion app or
+> `scripts/google_auth.py`) to grant the new scope — otherwise the calendar
+> keeps working and the Reminders region simply stays empty. Disable it any
+> time with `calendars.google.tasks_enabled: false` in `config.yaml`.
 
 The Pi reads the token, refreshes the short-lived access token on its own
 using the embedded refresh token, and never opens a browser.

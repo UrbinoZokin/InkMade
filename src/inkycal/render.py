@@ -4,7 +4,7 @@ from typing import List, Optional
 from zoneinfo import ZoneInfo
 from PIL import Image, ImageDraw, ImageFont
 
-from .models import Event
+from .models import Event, Reminder
 from .weather import WeatherAlert
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont:
@@ -280,6 +280,69 @@ def _prepare_weather_alert_lines(
         lines.extend(wrapped)
     return lines
 
+def _draw_reminders_region(
+    draw: ImageDraw.ImageDraw,
+    reminders: List[Reminder],
+    canvas_w: int,
+    padding: int,
+    y: int,
+    max_y: int,
+    header_font: ImageFont.FreeTypeFont,
+    item_font: ImageFont.FreeTypeFont,
+    small_font: ImageFont.FreeTypeFont,
+    max_items: int = 6,
+) -> int:
+    """Draw a "Reminders" region (Google Tasks) and return the new y cursor.
+
+    Rendered as its own block above the schedule so reminders stay visually
+    separate from all-day calendar events. Overdue items get a red checkbox.
+    Returns ``y`` unchanged when there are no reminders or no room.
+    """
+    if not reminders:
+        return y
+
+    header_h = header_font.size + 12
+    # Only start the region if the header plus at least one reminder line fit.
+    if y + header_h + item_font.size + 6 > max_y:
+        return y
+
+    draw.text((padding, y), "Reminders", fill="black", font=header_font)
+    y += header_h
+
+    box = "☐"
+    box_w = draw.textlength(box + " ", font=item_font)
+    text_x = padding + box_w
+    max_text_w = canvas_w - padding - text_x
+    item_line_h = item_font.size + 8
+
+    shown = 0
+    for reminder in reminders:
+        if shown >= max_items:
+            break
+        lines = _wrap_text(draw, reminder.title, item_font, max_text_w, max_lines=2)
+        block_h = item_line_h * len(lines) + 6
+        # Always keep at least one event line of breathing room below.
+        if y + block_h > max_y:
+            break
+        draw.text((padding, y), box, fill="red" if reminder.overdue else "black", font=item_font)
+        for i, line in enumerate(lines):
+            draw.text((text_x, y + i * item_line_h), line, fill="black", font=item_font)
+        y += block_h
+        shown += 1
+
+    remaining = len(reminders) - shown
+    if remaining > 0 and y + small_font.size + 6 <= max_y:
+        draw.text((padding, y), f"Plus {remaining} more reminders", fill="black", font=small_font)
+        y += small_font.size + 6
+
+    if shown > 0:
+        # Divider separating reminders from the schedule below.
+        draw.line((padding, y, canvas_w - padding, y), fill="black", width=2)
+        y += 18
+
+    return y
+
+
 def render_daily_schedule(
     canvas_w: int,
     canvas_h: int,
@@ -292,6 +355,7 @@ def render_daily_schedule(
     ups_status: Optional[dict] = None,
     tomorrow_events: Optional[List[Event]] = None,
     weather_alerts: Optional[List[WeatherAlert]] = None,
+    reminders: Optional[List[Reminder]] = None,
 ) -> Image.Image:
     img = Image.new("RGB", (canvas_w, canvas_h), "white")
     d = ImageDraw.Draw(img)
@@ -306,6 +370,8 @@ def render_daily_schedule(
     font_today_weather_bold = _load_bold_font(44)
     font_tomorrow_weather = _load_font(36)
     font_tomorrow_weather_bold = _load_bold_font(36)
+    font_reminder_header = _load_bold_font(40)
+    font_reminder = _load_font(38)
 
     padding = 40
     y = padding
@@ -375,6 +441,20 @@ def render_daily_schedule(
         weather_alert_block_h = weather_alert_header_h + (len(weather_alert_lines) * weather_alert_line_h) + 24
 
     max_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - updated_block_h - weather_alert_block_h
+
+    # Reminders (Google Tasks) render in their own region above the schedule,
+    # kept separate from all-day calendar events.
+    y = _draw_reminders_region(
+        d,
+        reminders or [],
+        canvas_w,
+        padding,
+        y,
+        max_y,
+        font_reminder_header,
+        font_reminder,
+        font_small,
+    )
 
     today_layouts = [
         _today_event_layout(

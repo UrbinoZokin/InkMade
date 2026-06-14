@@ -27,6 +27,11 @@ calendars:
     enabled: true
     calendar_ids:
       - "primary"
+    # Google Tasks are rendered as the "Reminders" region (incomplete tasks due
+    # today or overdue). Requires the tasks.readonly OAuth scope — re-run the
+    # Google sign-in flow if your existing token predates this.
+    tasks_enabled: true
+    task_list_allowlist: []  # empty means all task lists
   icloud:
     enabled: true
     calendar_name_allowlist: []  # empty means all discovered calendars

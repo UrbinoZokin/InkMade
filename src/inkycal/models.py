@@ -18,3 +18,11 @@ class Event:
     weather_end_icon: Optional[str] = None
     weather_end_text: Optional[str] = None
     weather_end_temperature_f: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class Reminder:
+    source: str                 # "google" (Google Tasks)
+    title: str
+    due: Optional[datetime] = None   # timezone-aware; None = no due date
+    overdue: bool = False            # due before today

@@ -10,7 +10,10 @@ from googleapiclient.discovery import build
 
 from .models import Event
 
-SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/tasks.readonly",
+]
 
 
 class GoogleAuthError(RuntimeError):
