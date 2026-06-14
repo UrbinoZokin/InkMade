@@ -36,7 +36,12 @@ class BleDevice:
 
 
 async def scan(timeout: float = 8.0) -> List[BleDevice]:
-    """Discover nearby InkyCal setup peripherals."""
+    """Discover nearby InkyCal setup peripherals.
+
+    Uses the BleakScanner context manager (rather than the deprecated
+    BleakScanner.discover) and collects matches via a detection callback,
+    which is the supported pattern in bleak 1.0+.
+    """
     try:
         from bleak import BleakScanner
     except ImportError as exc:  # pragma: no cover
@@ -44,16 +49,19 @@ async def scan(timeout: float = 8.0) -> List[BleDevice]:
 
     results: dict[str, BleDevice] = {}
 
-    devices = await BleakScanner.discover(timeout=timeout, return_adv=True)
-    for address, (dev, adv) in devices.items():
-        name = (adv.local_name or dev.name or "") if adv else (dev.name or "")
+    def _detected(device, adv) -> None:
+        name = (adv.local_name or device.name or "") if adv else (device.name or "")
         service_uuids = [u.lower() for u in (adv.service_uuids if adv else [])]
         is_inkycal = (
-            BLE_SERVICE_UUID.lower() in service_uuids
-            or name == BLE_LOCAL_NAME
+            BLE_SERVICE_UUID.lower() in service_uuids or name == BLE_LOCAL_NAME
         )
         if is_inkycal:
-            results[address] = BleDevice(address=address, name=name or BLE_LOCAL_NAME)
+            results[device.address] = BleDevice(
+                address=device.address, name=name or BLE_LOCAL_NAME
+            )
+
+    async with BleakScanner(detection_callback=_detected):
+        await asyncio.sleep(timeout)
     return list(results.values())
 
 
@@ -83,7 +91,9 @@ async def provision_wifi(
         final: dict = {}
         done = asyncio.Event()
 
-        def _on_status(_handle, data: bytearray) -> None:
+        # bleak 1.0+ passes the BleakGattCharacteristic as the first arg
+        # (was an int handle in 0.x); we don't use it either way.
+        def _on_status(_sender, data: bytearray) -> None:
             nonlocal final
             try:
                 parsed = json.loads(bytes(data).decode("utf-8"))
