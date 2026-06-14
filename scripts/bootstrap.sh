@@ -33,9 +33,19 @@ fi
 chmod +x scripts/*.sh || true
 ./scripts/install.sh
 
+# Optionally install the provisioning agent (BLE WiFi setup + Google token
+# delivery over WiFi for the companion app). Opt-in because it installs
+# Bluetooth/NetworkManager packages. Enable with:  INSTALL_PROVISIONING=1
+if [ "${INSTALL_PROVISIONING:-0}" = "1" ]; then
+  echo
+  echo "== Installing provisioning agent (INSTALL_PROVISIONING=1) =="
+  ./scripts/install_provisioning.sh
+fi
+
 echo
 echo "Bootstrap done."
 echo "Next:"
 echo "  - Copy config.yaml.example -> /opt/inkycal/config.yaml"
 echo "  - Copy .env.example -> /opt/inkycal/.env"
-echo "  - Put Google creds in /opt/inkycal/secrets/"
+echo "  - Put Google creds in /opt/inkycal/secrets/  (or use the companion app)"
+echo "  - For the companion app, install the agent: ./scripts/install_provisioning.sh"

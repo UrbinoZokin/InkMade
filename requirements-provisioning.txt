@@ -1,0 +1,9 @@
+# Extra dependencies for the on-device provisioning agent
+# (installed by scripts/install_provisioning.sh into the same venv).
+#
+# zeroconf  -> advertise the HTTP API over mDNS so the app finds the Pi on WiFi
+# bluezero  -> BLE GATT peripheral (BlueZ/D-Bus) for first-time WiFi setup
+# dbus-python / PyGObject are bluezero's runtime deps; on Raspberry Pi OS they
+# are best provided by apt (python3-dbus, python3-gi) -- see the install script.
+zeroconf==0.131.0
+bluezero==0.9.0
