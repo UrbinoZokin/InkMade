@@ -1,9 +1,17 @@
-# Extra dependencies for the on-device provisioning agent
-# (installed by scripts/install_provisioning.sh into the same venv).
+# Extra dependencies for the on-device provisioning agent.
 #
-# zeroconf  -> advertise the HTTP API over mDNS so the app finds the Pi on WiFi
-# bluezero  -> BLE GATT peripheral (BlueZ/D-Bus) for first-time WiFi setup
-# dbus-python / PyGObject are bluezero's runtime deps; on Raspberry Pi OS they
-# are best provided by apt (python3-dbus, python3-gi) -- see the install script.
-zeroconf==0.131.0
+# IMPORTANT: On a Raspberry Pi, install these with scripts/install_provisioning.sh,
+# NOT with a plain `pip install -r`. Here is why:
+#
+#   * zeroconf -- ships Cython C-extensions. Installing it from PyPI on a Pi
+#     compiles from source, which can HANG or run out of RAM on a Pi Zero 2 W.
+#     The install script instead installs the prebuilt apt package
+#     `python3-zeroconf` and exposes it to the venv. Listed here only so the
+#     dependency is documented.
+#   * bluezero -- pure Python BLE GATT peripheral over BlueZ/D-Bus. Safe to pip
+#     install; the script does this with --prefer-binary.
+#   * dbus-python / PyGObject -- bluezero's runtime deps; provided by apt
+#     (python3-dbus, python3-gi), again to avoid compiling on the Pi.
+#
+# zeroconf      (install via: apt install python3-zeroconf)
 bluezero==0.9.0
