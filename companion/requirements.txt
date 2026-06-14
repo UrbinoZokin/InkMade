@@ -1,7 +1,7 @@
 # Companion app runtime dependencies (cross-platform: Windows/macOS/Linux).
 requests==2.32.3
 zeroconf==0.131.0
-bleak==0.22.3
+bleak==3.0.2
 google-auth==2.34.0
 google-auth-oauthlib==1.2.1
 
