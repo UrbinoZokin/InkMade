@@ -48,16 +48,18 @@ def build() -> None:
         "bleak",
         "bleak.backends",
         *_bleak_backend_submodules(),
-        "inkycal_companion.cli",
-        "inkycal_companion.gui",
     ]
     args = [
-        "inkycal_companion/__main__.py",
+        # Launch via a top-level script so the frozen entry point does not
+        # run a package module as __main__ (which breaks relative imports).
+        "launcher.py",
         "--name", APP_NAME,
         "--onefile",
         "--windowed",            # no console window for the GUI
         "--noconfirm",
         "--clean",
+        # Bundle our whole package (cli/gui are imported lazily at runtime).
+        "--collect-submodules", "inkycal_companion",
         # zeroconf has dynamically-imported / compiled submodules; collect them.
         "--collect-submodules", "zeroconf",
         "--collect-submodules", "google_auth_oauthlib",
