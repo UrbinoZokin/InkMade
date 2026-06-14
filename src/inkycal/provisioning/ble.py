@@ -117,7 +117,11 @@ class BleProvisioner:
 
     # --- lifecycle ---
     def start(self) -> bool:
-        """Build and publish the GATT peripheral. Returns False if BLE is unusable."""
+        """Build and publish the GATT peripheral. Returns False if BLE is unusable.
+
+        Never raises: any BlueZ/D-Bus failure is logged and reported via the
+        return value so the rest of the agent (HTTP/mDNS) keeps running.
+        """
         try:
             from bluezero import adapter, peripheral
         except ImportError:
@@ -125,41 +129,61 @@ class BleProvisioner:
             return False
 
         try:
-            adapter_address = list(adapter.Adapter.available())[0].address
-        except Exception as exc:  # no BT adapter / dbus error / empty list
-            print(f"[ble] no Bluetooth adapter available: {exc}")
+            adapters = list(adapter.Adapter.available())
+        except Exception as exc:  # dbus error querying BlueZ
+            print(f"[ble] could not query Bluetooth adapters: {exc}")
+            return False
+        if not adapters:
+            print("[ble] no Bluetooth adapter available")
             return False
 
-        self._peripheral = peripheral.Peripheral(
-            adapter_address, local_name=BLE_LOCAL_NAME
-        )
-        self._peripheral.add_service(srv_id=1, uuid=BLE_SERVICE_UUID, primary=True)
+        dongle = adapters[0]
+        adapter_address = dongle.address
 
-        self._peripheral.add_characteristic(
-            srv_id=1, chr_id=1, uuid=BLE_CHAR_SSID_UUID,
-            value=[], notifying=False, flags=["write", "write-without-response"],
-            write_callback=self._on_write_ssid,
-        )
-        self._peripheral.add_characteristic(
-            srv_id=1, chr_id=2, uuid=BLE_CHAR_PSK_UUID,
-            value=[], notifying=False, flags=["write", "write-without-response"],
-            write_callback=self._on_write_psk,
-        )
-        self._peripheral.add_characteristic(
-            srv_id=1, chr_id=3, uuid=BLE_CHAR_COMMAND_UUID,
-            value=[], notifying=False, flags=["write"],
-            write_callback=self._on_write_command,
-        )
-        self._peripheral.add_characteristic(
-            srv_id=1, chr_id=4, uuid=BLE_CHAR_STATUS_UUID,
-            value=_encode(self._status_json()), notifying=False,
-            flags=["read", "notify"], read_callback=self._read_status,
-        )
-        self._peripheral.add_characteristic(
-            srv_id=1, chr_id=5, uuid=BLE_CHAR_INFO_UUID,
-            value=[], notifying=False, flags=["read"],
-            read_callback=self._read_info,
-        )
+        # The adapter must be powered on, or advertising fails with
+        # 'org.bluez.Error.Failed: Not Powered'. Power it on ourselves so the
+        # agent is self-healing after a reboot or rfkill toggle.
+        try:
+            if not dongle.powered:
+                print("[ble] adapter is off; powering it on")
+                dongle.powered = True
+        except Exception as exc:
+            print(f"[ble] could not power on the adapter: {exc}")
+
+        try:
+            self._peripheral = peripheral.Peripheral(
+                adapter_address, local_name=BLE_LOCAL_NAME
+            )
+            self._peripheral.add_service(srv_id=1, uuid=BLE_SERVICE_UUID, primary=True)
+
+            self._peripheral.add_characteristic(
+                srv_id=1, chr_id=1, uuid=BLE_CHAR_SSID_UUID,
+                value=[], notifying=False, flags=["write", "write-without-response"],
+                write_callback=self._on_write_ssid,
+            )
+            self._peripheral.add_characteristic(
+                srv_id=1, chr_id=2, uuid=BLE_CHAR_PSK_UUID,
+                value=[], notifying=False, flags=["write", "write-without-response"],
+                write_callback=self._on_write_psk,
+            )
+            self._peripheral.add_characteristic(
+                srv_id=1, chr_id=3, uuid=BLE_CHAR_COMMAND_UUID,
+                value=[], notifying=False, flags=["write"],
+                write_callback=self._on_write_command,
+            )
+            self._peripheral.add_characteristic(
+                srv_id=1, chr_id=4, uuid=BLE_CHAR_STATUS_UUID,
+                value=_encode(self._status_json()), notifying=False,
+                flags=["read", "notify"], read_callback=self._read_status,
+            )
+            self._peripheral.add_characteristic(
+                srv_id=1, chr_id=5, uuid=BLE_CHAR_INFO_UUID,
+                value=[], notifying=False, flags=["read"],
+                read_callback=self._read_info,
+            )
+        except Exception as exc:
+            print(f"[ble] failed to build GATT peripheral: {exc}")
+            return False
 
         # Keep a handle to the status characteristic for notifications.
         try:
@@ -169,5 +193,12 @@ class BleProvisioner:
 
         print(f"[ble] advertising '{BLE_LOCAL_NAME}' (service {BLE_SERVICE_UUID})")
         # publish() blocks running the GLib mainloop, so run it in a thread.
-        threading.Thread(target=self._peripheral.publish, name="inkycal-ble", daemon=True).start()
+        threading.Thread(target=self._publish, name="inkycal-ble", daemon=True).start()
         return True
+
+    def _publish(self) -> None:
+        """Run bluezero's blocking publish loop, logging instead of crashing."""
+        try:
+            self._peripheral.publish()
+        except Exception as exc:
+            print(f"[ble] BLE advertising stopped: {exc}")

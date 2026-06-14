@@ -53,6 +53,10 @@ echo "✓ zeroconf, bluezero, dbus, gi all import"
 
 echo "-- Making BlueZ advertise/peripheral capable..."
 sudo systemctl enable --now bluetooth || true
+# The adapter must be unblocked and powered, or advertising fails with
+# 'org.bluez.Error.Failed: Not Powered'.
+sudo rfkill unblock bluetooth || true
+sudo bluetoothctl power on || true
 
 echo "-- Installing systemd unit..."
 sudo cp "$APP_DIR/systemd/inkycal-provisioning.service" /etc/systemd/system/
