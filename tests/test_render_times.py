@@ -127,9 +127,10 @@ def test_weather_is_drawn_in_time_weather_column_for_today(monkeypatch):
     assert weather_icon_call[2].size == 44
     assert weather_temp_call[2].size == 44
 
-    # with mocked text lengths, first event weather width is 6 chars = 60 px,
-    # and time/weather column width is 160 px from the longest time range text.
-    centered_weather_x = 40 + ((160 - 60) / 2)
+    # with mocked text lengths, first event weather width is the icon (10px) +
+    # spacer (10px) + temperature (40px + 4px stroke allowance) = 64 px, and the
+    # time/weather column width is 160 px from the longest time range text.
+    centered_weather_x = 40 + ((160 - 64) / 2)
     assert weather_icon_call[0][0] == centered_weather_x
 
 
