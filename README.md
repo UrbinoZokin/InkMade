@@ -26,10 +26,36 @@ PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather
 
 # 🚀 Quick Install (one command)
 
+```bash
 curl -fsSL https://raw.githubusercontent.com/UrbinoZokin/InkMade/main/scripts/bootstrap.sh | \
-REPO_URL="https://github.com/UrbinoZokin/InkMade.git" bash
+  REPO_URL="https://github.com/UrbinoZokin/InkMade.git" bash
+```
 
-cd /opt/inkycal \
-git fetch origin \
-git reset --hard origin/main \
-chmod +x /opt/inkycal/scripts/update.sh
+To pull the latest changes afterwards:
+
+```bash
+cd /opt/inkycal && \
+  git fetch origin && \
+  git reset --hard origin/main && \
+  chmod +x /opt/inkycal/scripts/update.sh
+```
+
+## Google Calendar auth (off-device)
+
+The Pi runs headless, so the OAuth consent flow happens on another machine.
+
+1. On a machine with a browser, install the helper dependencies and run:
+
+   ```bash
+   pip install google-auth google-auth-oauthlib
+   python scripts/google_auth.py \
+     --credentials ./google_credentials.json \
+     --token ./google_token.json
+   ```
+
+2. Copy `google_token.json` to the Pi at the path referenced by
+   `GOOGLE_TOKEN_JSON` in `/opt/inkycal/.env`
+   (default: `/opt/inkycal/secrets/google_token.json`).
+
+The Pi reads the token, refreshes the short-lived access token on its own
+using the embedded refresh token, and never opens a browser.
