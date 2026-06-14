@@ -1,0 +1,17 @@
+[Unit]
+Description=InkyCal provisioning agent (WiFi setup over BLE + Google token over WiFi)
+After=network.target bluetooth.target
+Wants=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/opt/inkycal/.env
+ExecStart=/opt/inkycal/venv/bin/python -m inkycal.provisioning
+Restart=on-failure
+RestartSec=5
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

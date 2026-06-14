@@ -1,0 +1,22 @@
+[project]
+name = "inkycal-companion"
+version = "0.1.0"
+description = "Companion app to set up WiFi (over Bluetooth) and Google Calendar auth on an InkyCal Raspberry Pi."
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.32",
+    "zeroconf>=0.131",
+    "bleak>=0.22",
+    "google-auth>=2.34",
+    "google-auth-oauthlib>=1.2",
+]
+
+[project.scripts]
+inkycal-companion = "inkycal_companion.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["inkycal_companion*"]
