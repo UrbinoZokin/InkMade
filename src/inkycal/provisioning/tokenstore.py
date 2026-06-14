@@ -90,16 +90,18 @@ def save_token(raw: bytes | str, path: Optional[str] = None) -> str:
 def refresh_display() -> bool:
     """Best-effort: kick the display service so the new token is used now.
 
-    Tries the systemd timer's service first; falls back silently. Never
-    raises — a failed restart just means the next scheduled poll picks it up.
+    Uses ``--no-block`` because inkycal.service is Type=oneshot with a long
+    ExecStartPre; without it ``systemctl start`` would block until the render
+    finishes (45s+) and hang the HTTP request that triggered this. Never
+    raises — a failed start just means the next scheduled poll picks it up.
     """
     for cmd in (
-        ["systemctl", "start", "inkycal.service"],
-        ["sudo", "systemctl", "start", "inkycal.service"],
+        ["systemctl", "start", "--no-block", "inkycal.service"],
+        ["sudo", "systemctl", "start", "--no-block", "inkycal.service"],
     ):
         try:
             proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=30, check=False
+                cmd, capture_output=True, text=True, timeout=10, check=False
             )
         except (OSError, subprocess.SubprocessError):
             continue

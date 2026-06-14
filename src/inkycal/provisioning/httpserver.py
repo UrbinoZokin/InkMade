@@ -112,8 +112,10 @@ class _Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self._send_json(400, {"error": str(exc)})
             return
-        refreshed = tokenstore.refresh_display()
-        self._send_json(200, {"ok": True, "path": dest, "refreshed": refreshed})
+        # Trigger the display refresh in the background and respond right away,
+        # so a slow systemd start can never block/timeout the client.
+        threading.Thread(target=tokenstore.refresh_display, daemon=True).start()
+        self._send_json(200, {"ok": True, "path": dest})
 
     def _handle_wifi(self) -> None:
         body = self._read_body()
