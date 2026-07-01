@@ -6,7 +6,7 @@ import os
 import re
 import unicodedata
 from datetime import datetime, time, timedelta
-from typing import List
+from typing import List, Optional
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
@@ -15,8 +15,9 @@ from .calendar_google import fetch_google_events
 from .calendar_icloud import fetch_icloud_events
 from .config import load_config
 from .display_inky import show_on_inky
-from .models import Event
+from .models import Event, Reminder
 from .network import get_ups_status, get_wifi_status
+from .reminders_google import fetch_google_tasks
 from .render import render_daily_schedule
 from .weather import WeatherAlert, WeatherForecastResolver
 from .state import State, load_state, save_state
@@ -266,6 +267,28 @@ def _fetch_events_for_range(cfg, range_start: datetime, range_end: datetime, tz:
     )
 
 
+def _reminder_sort_key(r: Reminder):
+    # Overdue first, then by due date, then title.
+    return (0 if r.overdue else 1, r.due or datetime.max.replace(tzinfo=None), r.title.lower())
+
+
+def _fetch_reminders_for_day(cfg, day_end: datetime, tz: ZoneInfo) -> List[Reminder]:
+    reminders: List[Reminder] = []
+    if cfg.google.enabled and cfg.google.tasks_enabled:
+        token_path = os.environ.get("GOOGLE_TOKEN_JSON", "")
+        if token_path:
+            try:
+                reminders.extend(
+                    fetch_google_tasks(token_path, tz, day_end, cfg.google.task_list_allowlist)
+                )
+            except Exception as e:
+                print(f"Google Tasks fetch failed; continuing without reminders. Error: {e}")
+        else:
+            print("Google Tasks enabled but GOOGLE_TOKEN_JSON not set; skipping reminders.")
+
+    return sorted(reminders, key=_reminder_sort_key)
+
+
 def print_long_events_weather_report(config_path: str = CONFIG_PATH_DEFAULT) -> None:
     load_dotenv()
     cfg = load_config(config_path)
@@ -314,6 +337,7 @@ def _events_signature(
     sleep_banner: bool,
     wifi_status: str,
     ups_status: dict,
+    reminders: Optional[List[Reminder]] = None,
 ) -> str:
     # Only include fields that affect rendering.
     def _event_payload(e: Event) -> dict:
@@ -325,6 +349,14 @@ def _events_signature(
             "all_day": e.all_day,
             "location": e.location or "",
             "travel_time_text": e.travel_time_text or "",
+        }
+
+    def _reminder_payload(r: Reminder) -> dict:
+        return {
+            "source": r.source,
+            "title": r.title,
+            "due": r.due.astimezone(tz).isoformat() if r.due else "",
+            "overdue": r.overdue,
         }
 
     ups_payload = {
@@ -341,6 +373,7 @@ def _events_signature(
         "events": [_event_payload(e) for e in events],
         "tomorrow_events": [_event_payload(e) for e in tomorrow_events],
         "weather_alerts": [a.headline for a in weather_alerts],
+        "reminders": [_reminder_payload(r) for r in (reminders or [])],
     }
     b = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(b).hexdigest()
@@ -384,6 +417,7 @@ def run_once(
     tomorrow_end = day_end + timedelta(days=1)
     events = _fetch_events_for_range(cfg, day_start, day_end, tz)
     tomorrow_events = _fetch_events_for_range(cfg, tomorrow_start, tomorrow_end, tz)
+    reminders = _fetch_reminders_for_day(cfg, day_end, tz)
     weather_resolver = WeatherForecastResolver(
         timezone=cfg.timezone,
         latitude=cfg.weather.latitude,
@@ -400,7 +434,7 @@ def run_once(
     show_banner = in_sleep and cfg.sleep.enabled
     wifi_status = get_wifi_status()
     ups_status = get_ups_status()
-    sig = _events_signature(tz, events, tomorrow_events, weather_alerts, header_date, show_banner, wifi_status, ups_status)
+    sig = _events_signature(tz, events, tomorrow_events, weather_alerts, header_date, show_banner, wifi_status, ups_status, reminders)
     should_force_hourly = _should_force_hourly_refresh(state, now, timedelta(hours=1))
     print(
         f"Fetched {len(events)} events total; in_sleep={in_sleep}, show_banner={show_banner}, "
@@ -442,6 +476,7 @@ def run_once(
         ups_status=ups_status,
         tomorrow_events=tomorrow_events_with_weather,
         weather_alerts=weather_alerts,
+        reminders=reminders,
     )
 
     show_on_inky(img, rotate_degrees=cfg.display.rotate_degrees, border=cfg.display.border)

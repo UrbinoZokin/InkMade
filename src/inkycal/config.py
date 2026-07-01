@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import yaml
@@ -29,6 +29,8 @@ class DisplayConfig:
 class GoogleConfig:
     enabled: bool
     calendar_ids: List[str]
+    tasks_enabled: bool = True
+    task_list_allowlist: List[str] = field(default_factory=list)
 
 @dataclass
 class ICloudConfig:
@@ -96,6 +98,8 @@ def load_config(path: str) -> AppConfig:
         google=GoogleConfig(
             enabled=bool(google.get("enabled", True)),
             calendar_ids=list(google.get("calendar_ids", ["primary"])),
+            tasks_enabled=bool(google.get("tasks_enabled", True)),
+            task_list_allowlist=list(google.get("task_list_allowlist", [])),
         ),
         icloud=ICloudConfig(
             enabled=bool(icloud.get("enabled", True)),

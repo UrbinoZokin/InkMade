@@ -23,7 +23,10 @@ import argparse
 import os
 import sys
 
-SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/tasks.readonly",
+]
 
 
 def main() -> int:

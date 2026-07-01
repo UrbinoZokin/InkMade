@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from inkycal.models import Event
+from inkycal.models import Event, Reminder
 from inkycal.render import render_daily_schedule
 from inkycal.weather import WeatherAlert
 
@@ -127,9 +127,10 @@ def test_weather_is_drawn_in_time_weather_column_for_today(monkeypatch):
     assert weather_icon_call[2].size == 44
     assert weather_temp_call[2].size == 44
 
-    # with mocked text lengths, first event weather width is 6 chars = 60 px,
-    # and time/weather column width is 160 px from the longest time range text.
-    centered_weather_x = 40 + ((160 - 60) / 2)
+    # with mocked text lengths, first event weather width is the icon (10px) +
+    # spacer (10px) + temperature (40px + 4px stroke allowance) = 64 px, and the
+    # time/weather column width is 160 px from the longest time range text.
+    centered_weather_x = 40 + ((160 - 64) / 2)
     assert weather_icon_call[0][0] == centered_weather_x
 
 
@@ -415,3 +416,128 @@ def test_weather_alerts_render_above_footer_and_reduce_event_space(monkeypatch):
 
     assert rendered_event_words_with_alerts <= rendered_event_words_without_alerts
     assert "NATIONAL WEATHER SERVICE ALERT" in observed_with_alerts
+
+
+def test_reminders_render_in_their_own_region_above_all_day_events(monkeypatch):
+    tz = ZoneInfo("America/Phoenix")
+    all_day = Event(
+        source="merged",
+        title="All-day: Offsite",
+        start=datetime(2026, 2, 5, 0, 0, tzinfo=tz),
+        end=datetime(2026, 2, 6, 0, 0, tzinfo=tz),
+        all_day=True,
+    )
+    reminder = Reminder(
+        source="google",
+        title="Pay the bill",
+        due=datetime(2026, 2, 5, 0, 0, tzinfo=tz),
+    )
+
+    observed_positions = {}
+
+    from PIL import ImageDraw
+
+    original_text = ImageDraw.ImageDraw.text
+
+    def recording_text(self, xy, text, *args, **kwargs):
+        observed_positions.setdefault(text, []).append(xy)
+        return original_text(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", recording_text)
+
+    render_daily_schedule(
+        canvas_w=800,
+        canvas_h=900,
+        now=datetime(2026, 2, 5, 0, 0, tzinfo=tz),
+        events=[all_day],
+        tz=tz,
+        show_sleep_banner=False,
+        sleep_banner_text="",
+        reminders=[reminder],
+    )
+
+    assert "Reminders" in observed_positions
+    assert "Pay the bill" in observed_positions
+    # The reminders region (header + items) sits above the all-day events row.
+    reminders_header_y = observed_positions["Reminders"][0][1]
+    reminder_item_y = observed_positions["Pay the bill"][0][1]
+    all_day_y = observed_positions["All-day: Offsite"][0][1]
+    assert reminders_header_y < reminder_item_y < all_day_y
+
+
+def test_overdue_reminder_uses_red_checkbox(monkeypatch):
+    tz = ZoneInfo("America/Phoenix")
+    overdue = Reminder(
+        source="google",
+        title="Overdue task",
+        due=datetime(2026, 2, 3, 0, 0, tzinfo=tz),
+        overdue=True,
+    )
+    upcoming = Reminder(
+        source="google",
+        title="Today task",
+        due=datetime(2026, 2, 5, 0, 0, tzinfo=tz),
+        overdue=False,
+    )
+
+    checkbox_fills = []
+
+    from PIL import ImageDraw
+
+    original_text = ImageDraw.ImageDraw.text
+
+    def recording_text(self, xy, text, *args, **kwargs):
+        if text == "☐":
+            checkbox_fills.append(kwargs.get("fill"))
+        return original_text(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", recording_text)
+
+    render_daily_schedule(
+        canvas_w=800,
+        canvas_h=900,
+        now=datetime(2026, 2, 5, 0, 0, tzinfo=tz),
+        events=[],
+        tz=tz,
+        show_sleep_banner=False,
+        sleep_banner_text="",
+        reminders=[overdue, upcoming],
+    )
+
+    # First checkbox is overdue (red), second is on-time (black).
+    assert checkbox_fills[0] == "red"
+    assert checkbox_fills[1] == "black"
+
+
+def test_no_reminders_region_without_reminders(monkeypatch):
+    tz = ZoneInfo("America/Phoenix")
+    event = Event(
+        source="google",
+        title="Standup",
+        start=datetime(2026, 2, 5, 9, 0, tzinfo=tz),
+        end=datetime(2026, 2, 5, 9, 30, tzinfo=tz),
+    )
+
+    observed_text = []
+
+    from PIL import ImageDraw
+
+    original_text = ImageDraw.ImageDraw.text
+
+    def recording_text(self, xy, text, *args, **kwargs):
+        observed_text.append(text)
+        return original_text(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", recording_text)
+
+    render_daily_schedule(
+        canvas_w=800,
+        canvas_h=900,
+        now=datetime(2026, 2, 5, 0, 0, tzinfo=tz),
+        events=[event],
+        tz=tz,
+        show_sleep_banner=False,
+        sleep_banner_text="",
+    )
+
+    assert "Reminders" not in observed_text

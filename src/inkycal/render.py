@@ -4,7 +4,7 @@ from typing import List, Optional
 from zoneinfo import ZoneInfo
 from PIL import Image, ImageDraw, ImageFont
 
-from .models import Event
+from .models import Event, Reminder
 from .weather import WeatherAlert
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont:
@@ -33,6 +33,58 @@ def _weather_label(e: Event) -> str:
     if start_label and end_label:
         return f"{start_label} → {end_label}"
     return start_label or end_label
+
+
+# Stroke outline applied to temperature text in _draw_weather_text. It widens the
+# rendered glyphs beyond their textlength, so layout measurements must allow for it.
+WEATHER_TEMP_STROKE_WIDTH = 2
+
+
+def _weather_text_width(
+    draw: ImageDraw.ImageDraw,
+    event: Event,
+    font: ImageFont.FreeTypeFont,
+    temperature_font: ImageFont.FreeTypeFont,
+) -> float:
+    """Width of the weather label as actually rendered by _draw_weather_text.
+
+    Temperatures are drawn with the bold ``temperature_font`` and a stroke outline,
+    both of which make them wider than the plain ``font``. Measuring the column with
+    the plain font (as ``_weather_label`` widths do) underestimates the real width
+    and lets the temperature bleed into the title column. Mirroring the draw logic
+    here keeps the reserved column wide enough.
+    """
+    icon = event.weather_icon or ""
+    temp_text = event.weather_text or ""
+    if not icon and not temp_text:
+        return 0.0
+
+    def _temp_width(text: str) -> float:
+        if not text:
+            return 0.0
+        return draw.textlength(text, font=temperature_font) + (2 * WEATHER_TEMP_STROKE_WIDTH)
+
+    width = 0.0
+    if event.weather_end_icon or event.weather_end_text:
+        if icon:
+            width += draw.textlength(icon, font=font)
+        if icon and temp_text:
+            width += draw.textlength(" ", font=font)
+        width += _temp_width(temp_text)
+        width += draw.textlength(" → ", font=font)
+        if event.weather_end_icon:
+            width += draw.textlength(event.weather_end_icon, font=font)
+        if event.weather_end_icon and event.weather_end_text:
+            width += draw.textlength(" ", font=font)
+        width += _temp_width(event.weather_end_text or "")
+        return width
+
+    if icon:
+        width += draw.textlength(icon, font=font)
+    if icon and temp_text:
+        width += draw.textlength(" ", font=font)
+    width += _temp_width(temp_text)
+    return width
 
 
 
@@ -98,10 +150,10 @@ def _draw_weather_text(
                 temp_text,
                 fill=_temperature_color(event.weather_temperature_f),
                 font=temperature_font,
-                stroke_width=2,
+                stroke_width=WEATHER_TEMP_STROKE_WIDTH,
                 stroke_fill="black",
             )
-            x += draw.textlength(temp_text, font=temperature_font)
+            x += draw.textlength(temp_text, font=temperature_font) + (2 * WEATHER_TEMP_STROKE_WIDTH)
 
         arrow = " → "
         draw.text((x, y), arrow, fill="black", font=font)
@@ -122,7 +174,7 @@ def _draw_weather_text(
                 event.weather_end_text,
                 fill=_temperature_color(event.weather_end_temperature_f),
                 font=temperature_font,
-                stroke_width=2,
+                stroke_width=WEATHER_TEMP_STROKE_WIDTH,
                 stroke_fill="black",
             )
         return
@@ -142,7 +194,7 @@ def _draw_weather_text(
             temp_text,
             fill=_temperature_color(event.weather_temperature_f),
             font=temperature_font,
-            stroke_width=2,
+            stroke_width=WEATHER_TEMP_STROKE_WIDTH,
             stroke_fill="black",
         )
 
@@ -228,6 +280,69 @@ def _prepare_weather_alert_lines(
         lines.extend(wrapped)
     return lines
 
+def _draw_reminders_region(
+    draw: ImageDraw.ImageDraw,
+    reminders: List[Reminder],
+    canvas_w: int,
+    padding: int,
+    y: int,
+    max_y: int,
+    header_font: ImageFont.FreeTypeFont,
+    item_font: ImageFont.FreeTypeFont,
+    small_font: ImageFont.FreeTypeFont,
+    max_items: int = 6,
+) -> int:
+    """Draw a "Reminders" region (Google Tasks) and return the new y cursor.
+
+    Rendered as its own block above the schedule so reminders stay visually
+    separate from all-day calendar events. Overdue items get a red checkbox.
+    Returns ``y`` unchanged when there are no reminders or no room.
+    """
+    if not reminders:
+        return y
+
+    header_h = header_font.size + 12
+    # Only start the region if the header plus at least one reminder line fit.
+    if y + header_h + item_font.size + 6 > max_y:
+        return y
+
+    draw.text((padding, y), "Reminders", fill="black", font=header_font)
+    y += header_h
+
+    box = "☐"
+    box_w = draw.textlength(box + " ", font=item_font)
+    text_x = padding + box_w
+    max_text_w = canvas_w - padding - text_x
+    item_line_h = item_font.size + 8
+
+    shown = 0
+    for reminder in reminders:
+        if shown >= max_items:
+            break
+        lines = _wrap_text(draw, reminder.title, item_font, max_text_w, max_lines=2)
+        block_h = item_line_h * len(lines) + 6
+        # Always keep at least one event line of breathing room below.
+        if y + block_h > max_y:
+            break
+        draw.text((padding, y), box, fill="red" if reminder.overdue else "black", font=item_font)
+        for i, line in enumerate(lines):
+            draw.text((text_x, y + i * item_line_h), line, fill="black", font=item_font)
+        y += block_h
+        shown += 1
+
+    remaining = len(reminders) - shown
+    if remaining > 0 and y + small_font.size + 6 <= max_y:
+        draw.text((padding, y), f"Plus {remaining} more reminders", fill="black", font=small_font)
+        y += small_font.size + 6
+
+    if shown > 0:
+        # Divider separating reminders from the schedule below.
+        draw.line((padding, y, canvas_w - padding, y), fill="black", width=2)
+        y += 18
+
+    return y
+
+
 def render_daily_schedule(
     canvas_w: int,
     canvas_h: int,
@@ -240,6 +355,7 @@ def render_daily_schedule(
     ups_status: Optional[dict] = None,
     tomorrow_events: Optional[List[Event]] = None,
     weather_alerts: Optional[List[WeatherAlert]] = None,
+    reminders: Optional[List[Reminder]] = None,
 ) -> Image.Image:
     img = Image.new("RGB", (canvas_w, canvas_h), "white")
     d = ImageDraw.Draw(img)
@@ -254,6 +370,8 @@ def render_daily_schedule(
     font_today_weather_bold = _load_bold_font(44)
     font_tomorrow_weather = _load_font(36)
     font_tomorrow_weather_bold = _load_bold_font(36)
+    font_reminder_header = _load_bold_font(40)
+    font_reminder = _load_font(38)
 
     padding = 40
     y = padding
@@ -278,9 +396,15 @@ def render_daily_schedule(
     events_sorted = sorted(events, key=_event_sort_key)
 
     time_strings = [f"{_fmt_time(e.start)}–{_fmt_time(e.end)}" for e in events_sorted if not e.all_day]
-    weather_strings = [_weather_label(e) for e in events_sorted if not e.all_day and _weather_label(e)]
     max_time_w = max((d.textlength(s, font=font_time) for s in time_strings), default=0)
-    max_weather_w = max((d.textlength(s, font=font_today_weather) for s in weather_strings), default=0)
+    max_weather_w = max(
+        (
+            _weather_text_width(d, e, font_today_weather, font_today_weather_bold)
+            for e in events_sorted
+            if not e.all_day and _weather_label(e)
+        ),
+        default=0,
+    )
     time_col_w = max(max_time_w, max_weather_w)
     column_gap = 20
     title_line_h = font_title.size + 8
@@ -317,6 +441,20 @@ def render_daily_schedule(
         weather_alert_block_h = weather_alert_header_h + (len(weather_alert_lines) * weather_alert_line_h) + 24
 
     max_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - updated_block_h - weather_alert_block_h
+
+    # Reminders (Google Tasks) render in their own region above the schedule,
+    # kept separate from all-day calendar events.
+    y = _draw_reminders_region(
+        d,
+        reminders or [],
+        canvas_w,
+        padding,
+        y,
+        max_y,
+        font_reminder_header,
+        font_reminder,
+        font_small,
+    )
 
     today_layouts = [
         _today_event_layout(
@@ -385,7 +523,7 @@ def render_daily_schedule(
             d.text((x_time, y), time_str, fill="black", font=font_time)
             weather_text = _weather_label(e)
             if weather_text:
-                weather_w = d.textlength(weather_text, font=font_today_weather)
+                weather_w = _weather_text_width(d, e, font_today_weather, font_today_weather_bold)
                 x_weather = padding + max(0, (time_col_w - weather_w) / 2)
                 _draw_weather_text(
                     d,
@@ -450,12 +588,18 @@ def render_daily_schedule(
                     for e in tomorrow_sorted
                     if not e.all_day
                 ]
-                profile_weather_strings = [_weather_label(e) for e in tomorrow_sorted if not e.all_day and _weather_label(e)]
                 profile_time_w = max(
                     (d.textlength(s, font=profile_time_font) for s in profile_time_strings),
                     default=0,
                 )
-                profile_weather_w = max((d.textlength(s, font=font_tomorrow_weather) for s in profile_weather_strings), default=0)
+                profile_weather_w = max(
+                    (
+                        _weather_text_width(d, e, font_tomorrow_weather, font_tomorrow_weather_bold)
+                        for e in tomorrow_sorted
+                        if not e.all_day and _weather_label(e)
+                    ),
+                    default=0,
+                )
                 profile_gap = int(profile_time_font.size * 0.45)
                 profile_lines = [
                     _wrap_text(
@@ -504,8 +648,14 @@ def render_daily_schedule(
                     (d.textlength(s, font=time_font) for s in chosen_time_strings),
                     default=0,
                 )
-                fallback_weather_strings = [_weather_label(e) for e in tomorrow_sorted if not e.all_day and _weather_label(e)]
-                fallback_weather_w = max((d.textlength(s, font=font_tomorrow_weather) for s in fallback_weather_strings), default=0)
+                fallback_weather_w = max(
+                    (
+                        _weather_text_width(d, e, font_tomorrow_weather, font_tomorrow_weather_bold)
+                        for e in tomorrow_sorted
+                        if not e.all_day and _weather_label(e)
+                    ),
+                    default=0,
+                )
                 fallback_gap = int(time_font.size * 0.45)
                 chosen_lines = [
                     _wrap_text(
@@ -525,7 +675,11 @@ def render_daily_schedule(
                 default=0,
             )
             weather_col_w = max(
-                (d.textlength(_weather_label(e), font=font_tomorrow_weather) for e in tomorrow_sorted if not e.all_day and _weather_label(e)),
+                (
+                    _weather_text_width(d, e, font_tomorrow_weather, font_tomorrow_weather_bold)
+                    for e in tomorrow_sorted
+                    if not e.all_day and _weather_label(e)
+                ),
                 default=0,
             )
             gap = int(time_font.size * 0.45)
