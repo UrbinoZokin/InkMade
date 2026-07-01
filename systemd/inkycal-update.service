@@ -1,0 +1,15 @@
+[Unit]
+Description=InkyCal - Check GitHub and update the program over the air
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Runs as root so it can pull, reinstall deps/units and restart services
+# without a keyboard/SSH. The updater hands the checkout back to the app user.
+ExecStart=/opt/inkycal/scripts/ota_update.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

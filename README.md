@@ -20,6 +20,7 @@ PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather
 - Only refreshes screen when content changes (e-ink friendly)  
 - Nightly sleep window with one-time “Sleeping…” banner  
 - Weekly deep clean refresh to reduce ghosting  
+- Over-the-air updates (pulls new code from GitHub on its own — no SSH)  
 - Fully automated install with virtualenv (no externally-managed errors)  
 - systemd timers for reliability  
 
@@ -40,6 +41,53 @@ cd /opt/inkycal && \
   git reset --hard origin/main && \
   chmod +x /opt/inkycal/scripts/update.sh
 ```
+
+## 🔄 Over-the-air updates (no SSH)
+
+Once installed, the Pi keeps itself up to date. A systemd timer
+(`inkycal-update.timer`) runs `scripts/ota_update.sh` shortly after boot and
+then roughly every hour. On each run it checks GitHub and, **only if this
+checkout is behind the tracked branch**, pulls the new code and applies it:
+
+- reinstalls Python dependencies only when `requirements.txt` changed
+- reinstalls the systemd units only when anything under `systemd/` changed
+- restarts the provisioning agent if it's running
+- triggers a fresh display render with the new code
+
+So you can hand the device to someone (e.g. a parent), and push a fix from your
+laptop — the display updates itself the next time the timer fires, with no SSH
+or screen needed.
+
+Configure it in `config.yaml`:
+
+```yaml
+auto_update:
+  enabled: true      # set false to freeze the installed version
+  branch: "main"     # branch to track
+```
+
+Useful commands (on the Pi):
+
+```bash
+# Update right now instead of waiting for the timer
+sudo systemctl start inkycal-update.service
+
+# Watch what it did
+journalctl -u inkycal-update.service -n 50
+
+# See when it will next run
+systemctl list-timers inkycal-update.timer
+
+# Turn auto-updates off entirely
+sudo systemctl disable --now inkycal-update.timer
+```
+
+> **Note:** the updater does a `git reset --hard` to the tracked branch, so the
+> device always converges to GitHub's `main`. Your `config.yaml`, `.env` and
+> `secrets/` are gitignored and are never touched. **Existing installs** need to
+> register the new timer once — pull the code (command above) and re-run
+> `./scripts/install.sh` (or re-run the one-command bootstrap). After that the
+> updates are automatic and the installer step is never needed again.
 
 ## Google Calendar auth — Companion app (recommended)
 

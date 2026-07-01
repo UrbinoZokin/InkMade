@@ -49,6 +49,11 @@ class WeatherConfig:
     longitude: float
 
 @dataclass
+class AutoUpdateConfig:
+    enabled: bool = True
+    branch: str = "main"
+
+@dataclass
 class AppConfig:
     timezone: str
     poll_interval_minutes: int
@@ -59,6 +64,7 @@ class AppConfig:
     icloud: ICloudConfig
     travel: TravelConfig
     weather: WeatherConfig
+    auto_update: AutoUpdateConfig = field(default_factory=AutoUpdateConfig)
 
 def load_config(path: str) -> AppConfig:
     p = Path(path)
@@ -70,6 +76,7 @@ def load_config(path: str) -> AppConfig:
     calendars = data.get("calendars", {})
     travel = data.get("travel", {})
     weather = data.get("weather", {})
+    auto_update = data.get("auto_update", {})
 
     google = calendars.get("google", {})
     icloud = calendars.get("icloud", {})
@@ -113,5 +120,9 @@ def load_config(path: str) -> AppConfig:
         weather=WeatherConfig(
             latitude=float(weather.get("latitude", 33.4353)),
             longitude=float(weather.get("longitude", -112.3582)),
+        ),
+        auto_update=AutoUpdateConfig(
+            enabled=bool(auto_update.get("enabled", True)),
+            branch=str(auto_update.get("branch", "main")),
         ),
     )

@@ -44,3 +44,11 @@ travel:
 weather:
   latitude: 33.4353   # Goodyear, AZ (default)
   longitude: -112.3582
+
+# Over-the-air updates. When enabled, the inkycal-update systemd timer checks
+# GitHub roughly hourly and, if this checkout is behind the tracked branch,
+# pulls the new code and restarts the display — no SSH needed. Set enabled to
+# false to freeze the currently installed version.
+auto_update:
+  enabled: true
+  branch: "main"
