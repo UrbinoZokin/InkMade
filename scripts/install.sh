@@ -86,7 +86,7 @@ echo "-- Installing systemd unit files..."
 sudo cp "$APP_DIR/systemd/"*.service "$APP_DIR/systemd/"*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 
-sudo chmod +x /opt/inkycal/scripts/update.sh
+sudo chmod +x /opt/inkycal/scripts/update.sh /opt/inkycal/scripts/ota_update.sh
 
 # Sanity checks
 echo
@@ -184,6 +184,10 @@ sudo sed -i "s/^User=.*/User=$USER/" /etc/systemd/system/inkycal.service /etc/sy
 echo "-- Enabling timers..."
 sudo systemctl enable --now inkycal.timer
 sudo systemctl enable --now inkycal-deepclean.timer
+# Over-the-air updates: periodically pull the latest code from GitHub so the
+# display can be updated remotely without SSH. Disable with:
+#   auto_update.enabled: false  in config.yaml  (or: sudo systemctl disable --now inkycal-update.timer)
+sudo systemctl enable --now inkycal-update.timer
 
 # Quick inky detection (non-fatal)
 # echo "-- Checking Inky detection (non-fatal)..."

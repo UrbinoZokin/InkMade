@@ -22,6 +22,7 @@ from .render import render_daily_schedule
 from .weather import WeatherAlert, WeatherForecastResolver
 from .state import State, load_state, save_state
 from .travel import TravelTimeResolver
+from . import updates
 
 STATE_PATH_DEFAULT = "/var/lib/inkycal/state.json"
 CONFIG_PATH_DEFAULT = "/opt/inkycal/config.yaml"
@@ -338,6 +339,8 @@ def _events_signature(
     wifi_status: str,
     ups_status: dict,
     reminders: Optional[List[Reminder]] = None,
+    update_pending: bool = False,
+    last_updated_day: str = "",
 ) -> str:
     # Only include fields that affect rendering.
     def _event_payload(e: Event) -> dict:
@@ -374,6 +377,8 @@ def _events_signature(
         "tomorrow_events": [_event_payload(e) for e in tomorrow_events],
         "weather_alerts": [a.headline for a in weather_alerts],
         "reminders": [_reminder_payload(r) for r in (reminders or [])],
+        "update_pending": update_pending,
+        "last_updated_day": last_updated_day,
     }
     b = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(b).hexdigest()
@@ -411,6 +416,22 @@ def run_once(
         print("In sleep window; skipping poll/refresh")
         return
 
+    # Over-the-air update check. We only *look* here (fetch + compare) so the
+    # status bar can show a pending update and when the program was last
+    # updated; scripts/ota_update.sh is what actually pulls and applies.
+    last_updated = updates.last_updated_dt()
+    update_pending = False
+    if cfg.auto_update.enabled:
+        update_status = updates.check_for_update(branch=cfg.auto_update.branch)
+        update_pending = update_status.available
+        if update_status.error:
+            print(f"Update check: {update_status.error}")
+        else:
+            print(
+                f"Update check: behind={update_status.behind} "
+                f"local={update_status.local} remote={update_status.remote}"
+            )
+
     # Fetch events (only needed if we're not just placing a banner)
     day_start, day_end = _today_range(now, tz)
     tomorrow_start = day_start + timedelta(days=1)
@@ -434,7 +455,12 @@ def run_once(
     show_banner = in_sleep and cfg.sleep.enabled
     wifi_status = get_wifi_status()
     ups_status = get_ups_status()
-    sig = _events_signature(tz, events, tomorrow_events, weather_alerts, header_date, show_banner, wifi_status, ups_status, reminders)
+    last_updated_day = last_updated.astimezone(tz).strftime("%Y-%m-%d") if last_updated else ""
+    sig = _events_signature(
+        tz, events, tomorrow_events, weather_alerts, header_date, show_banner,
+        wifi_status, ups_status, reminders,
+        update_pending=update_pending, last_updated_day=last_updated_day,
+    )
     should_force_hourly = _should_force_hourly_refresh(state, now, timedelta(hours=1))
     print(
         f"Fetched {len(events)} events total; in_sleep={in_sleep}, show_banner={show_banner}, "
@@ -477,6 +503,8 @@ def run_once(
         tomorrow_events=tomorrow_events_with_weather,
         weather_alerts=weather_alerts,
         reminders=reminders,
+        update_pending=update_pending,
+        last_updated=last_updated,
     )
 
     show_on_inky(img, rotate_degrees=cfg.display.rotate_degrees, border=cfg.display.border)

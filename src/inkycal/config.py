@@ -49,6 +49,15 @@ class WeatherConfig:
     longitude: float
 
 @dataclass
+class AutoUpdateConfig:
+    enabled: bool = True
+    branch: str = "main"
+    # When to actually apply a pending update: "sleep" (only during the
+    # overnight sleep window, so it never disrupts daytime viewing) or
+    # "anytime" (apply as soon as it is found).
+    apply_window: str = "sleep"
+
+@dataclass
 class AppConfig:
     timezone: str
     poll_interval_minutes: int
@@ -59,6 +68,7 @@ class AppConfig:
     icloud: ICloudConfig
     travel: TravelConfig
     weather: WeatherConfig
+    auto_update: AutoUpdateConfig = field(default_factory=AutoUpdateConfig)
 
 def load_config(path: str) -> AppConfig:
     p = Path(path)
@@ -70,6 +80,7 @@ def load_config(path: str) -> AppConfig:
     calendars = data.get("calendars", {})
     travel = data.get("travel", {})
     weather = data.get("weather", {})
+    auto_update = data.get("auto_update", {})
 
     google = calendars.get("google", {})
     icloud = calendars.get("icloud", {})
@@ -113,5 +124,10 @@ def load_config(path: str) -> AppConfig:
         weather=WeatherConfig(
             latitude=float(weather.get("latitude", 33.4353)),
             longitude=float(weather.get("longitude", -112.3582)),
+        ),
+        auto_update=AutoUpdateConfig(
+            enabled=bool(auto_update.get("enabled", True)),
+            branch=str(auto_update.get("branch", "main")),
+            apply_window=str(auto_update.get("apply_window", "sleep")).strip().lower(),
         ),
     )
