@@ -2,11 +2,13 @@
 Description=InkyCal - Periodically check GitHub for over-the-air updates
 
 [Timer]
-# Check shortly after boot, then roughly hourly. RandomizedDelaySec spreads the
-# GitHub requests out so many Pis don't all fetch at the same instant.
+# Check shortly after boot, then every 30 min. Updates are usually only applied
+# during the overnight sleep window (see auto_update.apply_window), so this
+# cadence just needs to be frequent enough to catch that window promptly.
+# RandomizedDelaySec spreads the GitHub requests out across devices.
 OnBootSec=3min
-OnUnitActiveSec=1h
-RandomizedDelaySec=10min
+OnUnitActiveSec=30min
+RandomizedDelaySec=5min
 Persistent=true
 
 [Install]

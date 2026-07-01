@@ -45,10 +45,13 @@ weather:
   latitude: 33.4353   # Goodyear, AZ (default)
   longitude: -112.3582
 
-# Over-the-air updates. When enabled, the inkycal-update systemd timer checks
-# GitHub roughly hourly and, if this checkout is behind the tracked branch,
-# pulls the new code and restarts the display — no SSH needed. Set enabled to
-# false to freeze the currently installed version.
+# Over-the-air updates. When enabled, the display checks GitHub on every refresh
+# and shows "Update pending" in the bottom status bar when this checkout is
+# behind the tracked branch. The inkycal-update systemd timer then pulls and
+# applies the update — by default only during the overnight sleep window, so it
+# never disrupts daytime viewing. Set enabled: false to freeze the installed
+# version, or apply_window: anytime to apply updates as soon as they're found.
 auto_update:
   enabled: true
   branch: "main"
+  apply_window: "sleep"   # "sleep" = only overnight; "anytime" = as soon as found

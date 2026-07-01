@@ -44,26 +44,41 @@ cd /opt/inkycal && \
 
 ## 🔄 Over-the-air updates (no SSH)
 
-Once installed, the Pi keeps itself up to date. A systemd timer
-(`inkycal-update.timer`) runs `scripts/ota_update.sh` shortly after boot and
-then roughly every hour. On each run it checks GitHub and, **only if this
-checkout is behind the tracked branch**, pulls the new code and applies it:
+Once installed, the Pi keeps itself up to date. You can hand the device to
+someone (e.g. a parent), push a fix from your laptop, and the display updates
+itself — no SSH or screen needed.
+
+**Checking.** On every 15-minute refresh, the display checks GitHub to see if
+this checkout is behind the tracked branch. This is cheap (a `git fetch` that
+finds nothing is a couple of tiny requests — ~96/day is well within GitHub's
+limits, and no auth token is used), so there's no rate-limit concern.
+
+**Showing status.** When an update is available, the bottom status bar (next to
+the WiFi icon) shows **"Update pending"** in red, along with **"Software updated
+&lt;date&gt;"** — the date the program was last updated. So you get visible
+confirmation on the screen that your push was received.
+
+**Applying.** A systemd timer (`inkycal-update.timer`) runs
+`scripts/ota_update.sh` and, when it finds the checkout behind, pulls and
+applies the update:
 
 - reinstalls Python dependencies only when `requirements.txt` changed
 - reinstalls the systemd units only when anything under `systemd/` changed
 - restarts the provisioning agent if it's running
 - triggers a fresh display render with the new code
 
-So you can hand the device to someone (e.g. a parent), and push a fix from your
-laptop — the display updates itself the next time the timer fires, with no SSH
-or screen needed.
+By default this is done **only during the overnight sleep window**, so the
+screen never restarts while someone's looking at it during the day (it shows the
+"Sleeping…" banner overnight anyway). Set `apply_window: anytime` to apply as
+soon as an update is found instead.
 
 Configure it in `config.yaml`:
 
 ```yaml
 auto_update:
-  enabled: true      # set false to freeze the installed version
-  branch: "main"     # branch to track
+  enabled: true          # set false to freeze the installed version
+  branch: "main"         # branch to track
+  apply_window: "sleep"  # "sleep" = only overnight; "anytime" = as soon as found
 ```
 
 Useful commands (on the Pi):

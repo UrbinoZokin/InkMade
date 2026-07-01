@@ -52,6 +52,10 @@ class WeatherConfig:
 class AutoUpdateConfig:
     enabled: bool = True
     branch: str = "main"
+    # When to actually apply a pending update: "sleep" (only during the
+    # overnight sleep window, so it never disrupts daytime viewing) or
+    # "anytime" (apply as soon as it is found).
+    apply_window: str = "sleep"
 
 @dataclass
 class AppConfig:
@@ -124,5 +128,6 @@ def load_config(path: str) -> AppConfig:
         auto_update=AutoUpdateConfig(
             enabled=bool(auto_update.get("enabled", True)),
             branch=str(auto_update.get("branch", "main")),
+            apply_window=str(auto_update.get("apply_window", "sleep")).strip().lower(),
         ),
     )

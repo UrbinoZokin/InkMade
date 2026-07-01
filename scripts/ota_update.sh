@@ -47,34 +47,82 @@ fi
 OWNER="$(stat -c '%U' "$APP_DIR")"
 GROUP="$(stat -c '%G' "$APP_DIR")"
 
-# Read auto_update settings from config.yaml using the venv's PyYAML. Falls back
-# to sane defaults if the file, the section, the key, or python is unavailable.
-read_cfg() {
-  local key="$1" default="$2"
+# Read the settings we need from config.yaml using the venv's PyYAML, and let it
+# also decide whether we're allowed to *apply* right now. apply_window="sleep"
+# (the default) means updates are only applied during the overnight sleep window
+# so they never disrupt daytime viewing; "anytime" applies as soon as found.
+# Emits shell-friendly KEY=value lines; falls back to safe defaults on any error.
+cfg_eval() {
   if [ ! -x "$PY" ]; then
-    echo "$default"
+    printf 'enabled=true\nbranch=main\nshould_apply=true\n'
     return
   fi
-  "$PY" - "$APP_DIR/config.yaml" "$key" "$default" <<'PYEOF' 2>/dev/null || echo "$default"
+  "$PY" - "$APP_DIR/config.yaml" <<'PYEOF' 2>/dev/null || printf 'enabled=true\nbranch=main\nshould_apply=true\n'
 import sys
-path, key, default = sys.argv[1], sys.argv[2], sys.argv[3]
+from datetime import datetime, time
+
+DEFAULTS = "enabled=true\nbranch=main\nshould_apply=true"
 try:
     import yaml
-    with open(path) as f:
+    with open(sys.argv[1]) as f:
         data = yaml.safe_load(f) or {}
 except Exception:
-    print(default)
+    print(DEFAULTS)
     raise SystemExit(0)
-section = data.get("auto_update") or {}
-value = section.get(key, default)
-if isinstance(value, bool):
-    value = "true" if value else "false"
-print(value)
+
+au = data.get("auto_update") or {}
+enabled = bool(au.get("enabled", True))
+branch = str(au.get("branch", "main")).strip() or "main"
+apply_window = str(au.get("apply_window", "sleep")).strip().lower()
+
+sleep_cfg = data.get("sleep") or {}
+sleep_enabled = bool(sleep_cfg.get("enabled", True))
+
+def parse_hhmm(value, default):
+    try:
+        hh, mm = str(value).split(":")
+        return time(int(hh), int(mm))
+    except Exception:
+        return default
+
+start = parse_hhmm(sleep_cfg.get("start", "22:30"), time(22, 30))
+end = parse_hhmm(sleep_cfg.get("end", "06:30"), time(6, 30))
+
+tzname = str(data.get("timezone", "America/Phoenix"))
+try:
+    from zoneinfo import ZoneInfo
+    now_t = datetime.now(ZoneInfo(tzname)).timetz().replace(tzinfo=None)
+except Exception:
+    now_t = datetime.now().time()
+now_t = now_t.replace(second=0, microsecond=0)
+
+def in_window(t, s, e):
+    return (s <= t < e) if s < e else (t >= s or t < e)
+
+if apply_window == "anytime" or not sleep_enabled:
+    should_apply = True
+else:
+    should_apply = in_window(now_t, start, end)
+
+print(f"enabled={'true' if enabled else 'false'}")
+print(f"branch={branch}")
+print(f"should_apply={'true' if should_apply else 'false'}")
 PYEOF
 }
 
-ENABLED="$(read_cfg enabled true)"
-BRANCH="${OTA_BRANCH:-$(read_cfg branch main)}"
+ENABLED=true
+CFG_BRANCH=main
+SHOULD_APPLY=true
+while IFS='=' read -r _k _v; do
+  case "$_k" in
+    enabled) ENABLED="$_v" ;;
+    branch) CFG_BRANCH="$_v" ;;
+    should_apply) SHOULD_APPLY="$_v" ;;
+  esac
+done <<EOF
+$(cfg_eval)
+EOF
+BRANCH="${OTA_BRANCH:-$CFG_BRANCH}"
 
 case "$ENABLED" in
   true|True|1|yes) ;;
@@ -108,6 +156,14 @@ REMOTE="$(git rev-parse "origin/$BRANCH")"
 
 if [ "$LOCAL" = "$REMOTE" ]; then
   log "Already up to date ($LOCAL)."
+  exit 0
+fi
+
+# An update is available. Unless we're allowed to apply now (apply_window), hold
+# off — the display shows "Update pending" and we'll apply during the overnight
+# sleep window when nobody's looking.
+if [ "$SHOULD_APPLY" != "true" ]; then
+  log "Update available (${LOCAL:0:9} -> ${REMOTE:0:9}), but outside the apply window; deferring to the overnight sleep window."
   exit 0
 fi
 
