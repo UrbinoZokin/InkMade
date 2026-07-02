@@ -1,0 +1,15 @@
+[Unit]
+Description=InkyCal - Physical button handler (view toggle, force refresh, force update)
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/opt/inkycal/venv/bin/python -m inkycal.buttons
+Restart=on-failure
+RestartSec=5
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

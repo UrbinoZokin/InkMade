@@ -18,7 +18,7 @@ from .display_inky import show_on_inky
 from .models import Event, Reminder
 from .network import get_ups_status, get_wifi_status
 from .reminders_google import fetch_google_tasks
-from .render import render_daily_schedule
+from .render import render_daily_schedule, render_weekly_schedule
 from .weather import WeatherAlert, WeatherForecastResolver
 from .state import State, load_state, save_state
 from .travel import TravelTimeResolver
@@ -46,6 +46,16 @@ def _today_range(now: datetime, tz: ZoneInfo):
     day_start = local.replace(hour=0, minute=0, second=0, microsecond=0)
     day_end = day_start + timedelta(days=1)
     return day_start, day_end
+
+
+def _week_range(now: datetime, tz: ZoneInfo, days: int = 7):
+    local = now.astimezone(tz)
+    day_start = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    return day_start, day_start + timedelta(days=days)
+
+
+def _toggle_view_mode(current: str) -> str:
+    return "weekly" if current != "weekly" else "daily"
 
 
 def _normalize_text(value: str | None) -> str:
@@ -237,7 +247,7 @@ def _process_events(events: List[Event], travel_enabled: bool, origin_address: s
     return processed
 
 
-def _fetch_events_for_range(cfg, range_start: datetime, range_end: datetime, tz: ZoneInfo) -> List[Event]:
+def _fetch_raw_events(cfg, range_start: datetime, range_end: datetime, tz: ZoneInfo) -> List[Event]:
     events: List[Event] = []
     if cfg.google.enabled:
         token_path = os.environ.get("GOOGLE_TOKEN_JSON", "")
@@ -260,12 +270,26 @@ def _fetch_events_for_range(cfg, range_start: datetime, range_end: datetime, tz:
         except Exception as e:
             print(f"iCloud fetch failed; continuing without iCloud. Error: {e}")
 
+    return events
+
+
+def _fetch_events_for_range(cfg, range_start: datetime, range_end: datetime, tz: ZoneInfo) -> List[Event]:
+    events = _fetch_raw_events(cfg, range_start, range_end, tz)
     return _process_events(
         events,
         travel_enabled=cfg.travel.enabled,
         origin_address=cfg.travel.origin_address,
         back_to_back_window_minutes=cfg.travel.back_to_back_window_minutes,
     )
+
+
+def _fetch_events_for_week(cfg, range_start: datetime, range_end: datetime, tz: ZoneInfo) -> List[Event]:
+    # Weekly view only shows event names grouped by day, so this skips the
+    # travel-time and all-day-merge processing that _fetch_events_for_range
+    # applies for the daily view (merging would collapse all-day events from
+    # different days into a single row).
+    events = _fetch_raw_events(cfg, range_start, range_end, tz)
+    return _dedupe_events(events)
 
 
 def _reminder_sort_key(r: Reminder):
@@ -340,6 +364,8 @@ def _events_signature(
     ups_status: dict,
     reminders: Optional[List[Reminder]] = None,
     update_pending: bool = False,
+    view_mode: str = "daily",
+    week_events: Optional[List[Event]] = None,
 ) -> str:
     # Only include fields that affect rendering.
     def _event_payload(e: Event) -> dict:
@@ -377,6 +403,8 @@ def _events_signature(
         "weather_alerts": [a.headline for a in weather_alerts],
         "reminders": [_reminder_payload(r) for r in (reminders or [])],
         "update_pending": update_pending,
+        "view_mode": view_mode,
+        "week_events": [_event_payload(e) for e in (week_events or [])],
     }
     b = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(b).hexdigest()
@@ -387,6 +415,7 @@ def run_once(
     state_path: str = STATE_PATH_DEFAULT,
     force: bool = False,
     deep_clean: bool = False,
+    toggle_view: bool = False,
 ) -> None:
     load_dotenv()
     cfg = load_config(config_path)
@@ -394,6 +423,15 @@ def run_once(
 
     state = load_state(state_path)
     now = datetime.now(tz=tz)
+
+    if toggle_view:
+        state.view_mode = _toggle_view_mode(state.view_mode)
+        save_state(state_path, state)
+        force = True
+        print(f"View toggled to '{state.view_mode}'")
+
+    # load_state() and _toggle_view_mode() both already guarantee one of these two values.
+    view_mode = state.view_mode
 
     sleep_start = _parse_hhmm(cfg.sleep.start)
     sleep_end = _parse_hhmm(cfg.sleep.end)
@@ -431,11 +469,6 @@ def run_once(
 
     # Fetch events (only needed if we're not just placing a banner)
     day_start, day_end = _today_range(now, tz)
-    tomorrow_start = day_start + timedelta(days=1)
-    tomorrow_end = day_end + timedelta(days=1)
-    events = _fetch_events_for_range(cfg, day_start, day_end, tz)
-    tomorrow_events = _fetch_events_for_range(cfg, tomorrow_start, tomorrow_end, tz)
-    reminders = _fetch_reminders_for_day(cfg, day_end, tz)
     weather_resolver = WeatherForecastResolver(
         timezone=cfg.timezone,
         latitude=cfg.weather.latitude,
@@ -447,19 +480,38 @@ def run_once(
         print(f"NWS alert lookup failed; continuing without alerts. Error: {e}")
         weather_alerts = []
 
-    # Render signature includes whether we show the sleep banner
     header_date = now.strftime("%A, %B %-d, %Y")
     show_banner = in_sleep and cfg.sleep.enabled
     wifi_status = get_wifi_status()
     ups_status = get_ups_status()
+
+    events: List[Event] = []
+    tomorrow_events: List[Event] = []
+    reminders: List[Reminder] = []
+    week_events: List[Event] = []
+
+    if view_mode == "weekly":
+        week_start, week_end = _week_range(now, tz)
+        week_events = _fetch_events_for_week(cfg, week_start, week_end, tz)
+    else:
+        tomorrow_start = day_start + timedelta(days=1)
+        tomorrow_end = day_end + timedelta(days=1)
+        events = _fetch_events_for_range(cfg, day_start, day_end, tz)
+        tomorrow_events = _fetch_events_for_range(cfg, tomorrow_start, tomorrow_end, tz)
+        reminders = _fetch_reminders_for_day(cfg, day_end, tz)
+
+    # Render signature includes whether we show the sleep banner
     sig = _events_signature(
         tz, events, tomorrow_events, weather_alerts, header_date, show_banner,
         wifi_status, ups_status, reminders,
         update_pending=update_pending,
+        view_mode=view_mode,
+        week_events=week_events,
     )
     should_force_hourly = _should_force_hourly_refresh(state, now, timedelta(hours=1))
     print(
-        f"Fetched {len(events)} events total; in_sleep={in_sleep}, show_banner={show_banner}, "
+        f"view_mode={view_mode}; fetched {len(events) + len(week_events)} events total; "
+        f"in_sleep={in_sleep}, show_banner={show_banner}, "
         f"force={force}, deep_clean={deep_clean}, hourly_refresh={should_force_hourly}"
     )
     if (
@@ -472,35 +524,50 @@ def run_once(
         print("No schedule change; skipping display refresh")
         return
 
-    events_with_weather = _apply_weather_forecast(
-        events,
-        cfg.timezone,
-        cfg.weather.latitude,
-        cfg.weather.longitude,
-    )
-    tomorrow_events_with_weather = _apply_weather_forecast(
-        tomorrow_events,
-        cfg.timezone,
-        cfg.weather.latitude,
-        cfg.weather.longitude,
-        include_end_weather_for_long_events=False,
-    )
+    if view_mode == "weekly":
+        img = render_weekly_schedule(
+            canvas_w=cfg.display.width,
+            canvas_h=cfg.display.height,
+            now=now,
+            week_events=week_events,
+            tz=tz,
+            show_sleep_banner=show_banner,
+            sleep_banner_text=cfg.sleep.banner_text,
+            wifi_status=wifi_status,
+            ups_status=ups_status,
+            weather_alerts=weather_alerts,
+            update_pending=update_pending,
+        )
+    else:
+        events_with_weather = _apply_weather_forecast(
+            events,
+            cfg.timezone,
+            cfg.weather.latitude,
+            cfg.weather.longitude,
+        )
+        tomorrow_events_with_weather = _apply_weather_forecast(
+            tomorrow_events,
+            cfg.timezone,
+            cfg.weather.latitude,
+            cfg.weather.longitude,
+            include_end_weather_for_long_events=False,
+        )
 
-    img = render_daily_schedule(
-        canvas_w=cfg.display.width,
-        canvas_h=cfg.display.height,
-        now=now,
-        events=events_with_weather,
-        tz=tz,
-        show_sleep_banner=show_banner,
-        sleep_banner_text=cfg.sleep.banner_text,
-        wifi_status=wifi_status,
-        ups_status=ups_status,
-        tomorrow_events=tomorrow_events_with_weather,
-        weather_alerts=weather_alerts,
-        reminders=reminders,
-        update_pending=update_pending,
-    )
+        img = render_daily_schedule(
+            canvas_w=cfg.display.width,
+            canvas_h=cfg.display.height,
+            now=now,
+            events=events_with_weather,
+            tz=tz,
+            show_sleep_banner=show_banner,
+            sleep_banner_text=cfg.sleep.banner_text,
+            wifi_status=wifi_status,
+            ups_status=ups_status,
+            tomorrow_events=tomorrow_events_with_weather,
+            weather_alerts=weather_alerts,
+            reminders=reminders,
+            update_pending=update_pending,
+        )
 
     show_on_inky(img, rotate_degrees=cfg.display.rotate_degrees, border=cfg.display.border)
 
@@ -520,13 +587,24 @@ def main():
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--deep-clean", action="store_true")
     ap.add_argument("--long-events-weather-report", action="store_true")
+    ap.add_argument(
+        "--toggle-view",
+        action="store_true",
+        help="Toggle between the daily and weekly view before rendering",
+    )
     args = ap.parse_args()
 
     if args.long_events_weather_report:
         print_long_events_weather_report(config_path=args.config)
         return
 
-    run_once(config_path=args.config, state_path=args.state, force=args.force, deep_clean=args.deep_clean)
+    run_once(
+        config_path=args.config,
+        state_path=args.state,
+        force=args.force,
+        deep_clean=args.deep_clean,
+        toggle_view=args.toggle_view,
+    )
 
 
 if __name__ == "__main__":

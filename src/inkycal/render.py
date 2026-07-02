@@ -1,6 +1,6 @@
 from __future__ import annotations
-from datetime import datetime
-from typing import List, Optional
+from datetime import date, datetime, timedelta
+from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 from PIL import Image, ImageDraw, ImageFont
 
@@ -792,6 +792,184 @@ def render_daily_schedule(
         d.text((padding + 20, y0 + 18), sleep_banner_text, fill="black", font=font_small)
 
     return img
+
+
+def _weekday_header_label(day: date, today: date) -> str:
+    label = day.strftime("%A, %B %-d")
+    if day == today:
+        label += " (Today)"
+    return label
+
+
+def render_weekly_schedule(
+    canvas_w: int,
+    canvas_h: int,
+    now: datetime,
+    week_events: List[Event],
+    tz: ZoneInfo,
+    show_sleep_banner: bool,
+    sleep_banner_text: str,
+    wifi_status: str = "connected",
+    ups_status: Optional[dict] = None,
+    weather_alerts: Optional[List[WeatherAlert]] = None,
+    update_pending: bool = False,
+    days: int = 7,
+) -> Image.Image:
+    """Weekly overview: the next `days` days, event names only (no times)."""
+    img = Image.new("RGB", (canvas_w, canvas_h), "white")
+    d = ImageDraw.Draw(img)
+
+    font_header = _load_font(64)
+    font_subheader = _load_font(34)
+    font_day_header = _load_bold_font(40)
+    font_event = _load_font(34)
+    font_small = _load_font(28)
+    font_alert_header = _load_font(34)
+
+    padding = 40
+    y = padding
+
+    now_local = now.astimezone(tz)
+    today = now_local.date()
+    last_day = today + timedelta(days=days - 1)
+
+    title = "This Week"
+    title_w = d.textlength(title, font=font_header)
+    d.text(((canvas_w - title_w) / 2, y), title, fill="black", font=font_header)
+    y += font_header.size + 10
+
+    subtitle = f"{today.strftime('%B %-d')} – {last_day.strftime('%B %-d, %Y')}"
+    subtitle_w = d.textlength(subtitle, font=font_subheader)
+    d.text(((canvas_w - subtitle_w) / 2, y), subtitle, fill="black", font=font_subheader)
+    y += font_subheader.size + 20
+
+    d.line((padding, y, canvas_w - padding, y), fill="black", width=2)
+    y += 25
+
+    events_by_day: Dict[date, List[Event]] = {}
+    for e in sorted(week_events, key=_event_sort_key):
+        if e.all_day:
+            # A multi-day all-day event (e.g. a 3-day trip) is fetched once
+            # for the whole week, unlike the daily view's per-day fetch that
+            # naturally re-surfaces it on each overlapping day. Expand it
+            # across every day of the display range it spans instead of
+            # only its start day. `end` is exclusive (matches _today_range).
+            span_start = max(e.start.astimezone(tz).date(), today)
+            span_end = min(e.end.astimezone(tz).date(), last_day + timedelta(days=1))
+            day_cursor = span_start
+            while day_cursor < span_end:
+                events_by_day.setdefault(day_cursor, []).append(e)
+                day_cursor += timedelta(days=1)
+        else:
+            day_key = e.start.astimezone(tz).date()
+            events_by_day.setdefault(day_key, []).append(e)
+
+    # Footer (status bar) sizing, mirrors render_daily_schedule but simpler:
+    # a fixed stack of lines rather than dynamic side-by-side wrapping.
+    banner_h = 70
+    ups_text = _format_ups_status(ups_status)
+    ota_text = _format_update_status(update_pending)
+    updated_text = f"Updated: {now_local.strftime('%-I:%M %p').lower()}"
+    footer_line_h = font_small.size + 6
+    footer_block_h = footer_line_h + 10
+    if ups_text:
+        footer_block_h += footer_line_h
+    if ota_text:
+        footer_block_h += footer_line_h
+
+    weather_alert_lines = _prepare_weather_alert_lines(
+        d, weather_alerts or [], font_small, canvas_w - (2 * padding)
+    )
+    weather_alert_line_h = font_small.size + 4
+    weather_alert_header_h = font_alert_header.size + 6
+    weather_alert_block_h = 0
+    if weather_alert_lines:
+        weather_alert_block_h = weather_alert_header_h + (len(weather_alert_lines) * weather_alert_line_h) + 24
+
+    max_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - footer_block_h - weather_alert_block_h
+
+    day_header_h = font_day_header.size + 10
+    event_line_h = font_event.size + 8
+    no_events_h = font_small.size + 8
+    day_block_gap = 22
+    bullet = "•  "
+    bullet_w = d.textlength(bullet, font=font_event)
+    max_event_w = canvas_w - (2 * padding) - bullet_w
+
+    hidden_days = 0
+    for offset in range(days):
+        day = today + timedelta(days=offset)
+        day_events = events_by_day.get(day, [])
+        event_lines = [_wrap_text(d, e.title, font_event, max_event_w, max_lines=2) for e in day_events]
+
+        first_row_h = (len(event_lines[0]) * event_line_h) if event_lines else no_events_h
+        if y + day_header_h + first_row_h > max_y:
+            hidden_days = days - offset
+            break
+
+        d.text((padding, y), _weekday_header_label(day, today), fill="black", font=font_day_header)
+        y += day_header_h
+        d.line((padding, y - 4, padding + 220, y - 4), fill="black", width=2)
+
+        if not day_events:
+            d.text((padding, y), "No events", fill="black", font=font_small)
+            y += no_events_h
+        else:
+            for idx, (e, lines) in enumerate(zip(day_events, event_lines)):
+                needed_h = len(lines) * event_line_h
+                has_more_hidden = idx < len(day_events) - 1
+                reserve = (font_small.size + 8) if has_more_hidden else 0
+                if y + needed_h + reserve > max_y:
+                    remaining = len(day_events) - idx
+                    d.text((padding, y), f"+{remaining} more", fill="black", font=font_small)
+                    y += font_small.size + 8
+                    break
+                d.text((padding, y), bullet, fill="black", font=font_event)
+                for i, line in enumerate(lines):
+                    d.text((padding + bullet_w, y + i * event_line_h), line, fill="black", font=font_event)
+                y += needed_h
+
+        y += day_block_gap
+
+    if hidden_days > 0 and y + font_small.size + 6 <= max_y:
+        suffix = "s" if hidden_days != 1 else ""
+        d.text((padding, y), f"Plus {hidden_days} more day{suffix}", fill="black", font=font_small)
+        y += font_small.size + 8
+
+    bottom_y = canvas_h - padding - (banner_h if show_sleep_banner else 0)
+    alert_bottom_y = bottom_y - footer_block_h
+    if weather_alert_lines:
+        alert_top = alert_bottom_y - weather_alert_block_h
+        alert_bottom = alert_bottom_y - 6
+        d.rectangle((padding, alert_top, canvas_w - padding, alert_bottom), outline="red", width=3)
+        alert_header_y = alert_top + 8
+        d.text((padding + 12, alert_header_y), "NATIONAL WEATHER SERVICE ALERT", fill="red", font=font_alert_header)
+
+        line_start_y = alert_header_y + weather_alert_header_h
+        d.line((padding + 10, line_start_y - 4, canvas_w - padding - 10, line_start_y - 4), fill="red", width=2)
+        for line in weather_alert_lines:
+            d.text((padding + 12, line_start_y), line, fill="black", font=font_small)
+            line_start_y += weather_alert_line_h
+
+    footer_y = bottom_y - footer_block_h + 10
+    if ota_text:
+        d.text((padding, footer_y), ota_text, fill="red", font=font_small)
+        footer_y += footer_line_h
+    if ups_text:
+        d.text((padding, footer_y), ups_text, fill="black", font=font_small)
+        footer_y += footer_line_h
+    d.text((padding, footer_y), updated_text, fill="black", font=font_small)
+
+    usable_canvas_h = canvas_h - (banner_h if show_sleep_banner else 0)
+    _draw_wifi_status(d, canvas_w, usable_canvas_h, padding, wifi_status, font_small)
+
+    if show_sleep_banner:
+        y0 = canvas_h - padding - banner_h
+        d.rectangle((padding, y0, canvas_w - padding, y0 + banner_h), outline="black", width=2)
+        d.text((padding + 20, y0 + 18), sleep_banner_text, fill="black", font=font_small)
+
+    return img
+
 
 def _format_update_status(update_pending: bool) -> Optional[str]:
     """Text for the OTA status line, or None when there's no update pending."""

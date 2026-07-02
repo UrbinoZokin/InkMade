@@ -21,8 +21,48 @@ PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather
 - Nightly sleep window with one-time “Sleeping…” banner  
 - Weekly deep clean refresh to reduce ghosting  
 - Over-the-air updates (pulls new code from GitHub on its own — no SSH)  
+- Physical buttons: switch daily/weekly view, force refresh, force update  
 - Fully automated install with virtualenv (no externally-managed errors)  
 - systemd timers for reliability  
+
+---
+
+## 🔘 Physical buttons
+
+The Inky Impression's 4 built-in buttons (labeled A/B/C/D on the board) are
+wired up as follows:
+
+| Button | Function |
+| --- | --- |
+| A | Toggle between the daily view (default) and a weekly view showing the next 7 days' event names (no times) |
+| B | Force an immediate display refresh |
+| C | Unused (reserved for future use) |
+| D | Force an OTA update check, applying it right away if one is pending (bypasses the overnight `apply_window`) |
+
+Pressing A or B re-renders instantly using the same code path as the
+periodic timer, so credentials and file ownership stay consistent. Pressing
+D asks `inkycal-update.service` to check GitHub and, if the checkout is
+behind, apply the update immediately instead of waiting for the next
+scheduled window.
+
+Handled by `inkycal-buttons.service`, installed and enabled automatically by
+`scripts/install.sh`. Configure it in `config.yaml`:
+
+```yaml
+buttons:
+  enabled: true
+  pin_view: 5
+  pin_refresh: 6
+  pin_unused: 25
+  pin_update: 24
+  bounce_time_ms: 300
+```
+
+Pin numbers are BCM GPIO numbers. The defaults match the 13.3" Inky
+Impression; button C is wired to GPIO25 on that model instead of the GPIO16
+used on the smaller 4"/5.7"/7.3" sizes — if you're on one of those, set
+`pin_unused: 16`. Set `enabled: false` to disable the daemon entirely (or
+`sudo systemctl disable --now inkycal-buttons.service`).
 
 ---
 
