@@ -54,9 +54,8 @@ finds nothing is a couple of tiny requests — ~96/day is well within GitHub's
 limits, and no auth token is used), so there's no rate-limit concern.
 
 **Showing status.** When an update is available, the bottom status bar (next to
-the WiFi icon) shows **"Update pending"** in red, along with **"Software updated
-&lt;date&gt;"** — the date the program was last updated. So you get visible
-confirmation on the screen that your push was received.
+the WiFi icon) shows **"Update pending"** in red — visible confirmation on the
+screen that your push was received.
 
 **Applying.** A systemd timer (`inkycal-update.timer`) runs
 `scripts/ota_update.sh` and, when it finds the checkout behind, pulls and

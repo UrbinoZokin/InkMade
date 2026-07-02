@@ -357,7 +357,6 @@ def render_daily_schedule(
     weather_alerts: Optional[List[WeatherAlert]] = None,
     reminders: Optional[List[Reminder]] = None,
     update_pending: bool = False,
-    last_updated: Optional[datetime] = None,
 ) -> Image.Image:
     img = Image.new("RGB", (canvas_w, canvas_h), "white")
     d = ImageDraw.Draw(img)
@@ -431,7 +430,7 @@ def render_daily_schedule(
             updated_block_h += ups_text_h + 8
 
     # Over-the-air update status (its own line above the "Updated:" line).
-    ota_text = _format_update_status(update_pending, last_updated, tz)
+    ota_text = _format_update_status(update_pending)
     ota_text_h = font_small.size + 6
     if ota_text:
         updated_block_h += ota_text_h + 8
@@ -781,10 +780,9 @@ def render_daily_schedule(
         d.text((ups_x, ups_y), ups_text, fill="black", font=font_small)
     d.text((padding, updated_y), updated_text, fill="black", font=font_small)
     if ota_text:
-        # Sits above the UPS/updated lines. Pending updates are drawn in red so
-        # they stand out; the steady "Software updated <date>" line is black.
+        # Sits above the UPS/updated lines, in red so it stands out.
         ota_y = ota_top_ref - ota_text_h - 8
-        d.text((padding, ota_y), ota_text, fill="red" if update_pending else "black", font=font_small)
+        d.text((padding, ota_y), ota_text, fill="red", font=font_small)
     usable_canvas_h = canvas_h - (banner_h if show_sleep_banner else 0)
     _draw_wifi_status(d, canvas_w, usable_canvas_h, padding, wifi_status, font_small)
 
@@ -795,26 +793,9 @@ def render_daily_schedule(
 
     return img
 
-def _format_update_status(
-    update_pending: bool,
-    last_updated: Optional[datetime],
-    tz: ZoneInfo,
-) -> Optional[str]:
-    """Text for the OTA status line, or None when there's nothing to show.
-
-    Combines a "Update pending" flag with the date the program was last updated,
-    e.g. "Update pending  ·  Software updated Jun 28".
-    """
-    parts: List[str] = []
-    if update_pending:
-        parts.append("Update pending")
-    if last_updated is not None:
-        try:
-            local = last_updated.astimezone(tz)
-        except (ValueError, OSError):
-            local = last_updated
-        parts.append(f"Software updated {local.strftime('%b %-d')}")
-    return "  ·  ".join(parts) if parts else None
+def _format_update_status(update_pending: bool) -> Optional[str]:
+    """Text for the OTA status line, or None when there's no update pending."""
+    return "Update pending" if update_pending else None
 
 
 def _format_ups_status(ups_status: Optional[dict]) -> Optional[str]:
