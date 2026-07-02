@@ -1,5 +1,4 @@
 import subprocess
-from datetime import datetime, timezone
 
 import pytest
 
@@ -84,11 +83,3 @@ def test_find_repo_dir_returns_none_without_any_checkout(tmp_path, monkeypatch):
     status = updates.check_for_update(branch="main", app_dir=str(tmp_path / "missing"))
     assert status.available is False
     assert status.error == "no git checkout found"
-
-
-def test_last_updated_dt_returns_recent_time(repo_with_origin):
-    dt = updates.last_updated_dt(app_dir=str(repo_with_origin["app"]))
-    assert dt is not None
-    # The clone just happened, so logs/HEAD mtime is essentially now.
-    age = abs((datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds())
-    assert age < 300

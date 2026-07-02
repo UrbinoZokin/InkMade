@@ -1,16 +1,14 @@
 """Lightweight helpers for the over-the-air update feature.
 
 The render loop uses these to *check* (never apply) whether the local checkout
-is behind the tracked branch on GitHub, and to find when the program was last
-updated, so it can show that in the status bar. Applying updates is done
-separately by scripts/ota_update.sh. Everything here is best-effort and never
-raises into the render path.
+is behind the tracked branch on GitHub, so it can show "Update pending" in the
+status bar. Applying updates is done separately by scripts/ota_update.sh.
+Everything here is best-effort and never raises into the render path.
 """
 from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -104,24 +102,3 @@ def check_for_update(
         return UpdateStatus(checked=checked, error="git timed out")
     except Exception as exc:  # never break the render over an update check
         return UpdateStatus(checked=checked, error=str(exc))
-
-
-def last_updated_dt(app_dir: Optional[str] = None) -> Optional[datetime]:
-    """When the checkout was last moved to a new commit (i.e. last updated).
-
-    Uses the modification time of .git/logs/HEAD, which git appends to every
-    time HEAD changes (the initial clone and every ``git reset``/pull the
-    updater does). Returns a timezone-aware local datetime, or None if it can't
-    be determined.
-    """
-    repo = find_repo_dir(app_dir)
-    if repo is None:
-        return None
-    for rel in (Path(".git") / "logs" / "HEAD", Path(".git") / "HEAD"):
-        path = repo / rel
-        try:
-            if path.exists():
-                return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).astimezone()
-        except OSError:
-            continue
-    return None

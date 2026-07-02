@@ -340,7 +340,6 @@ def _events_signature(
     ups_status: dict,
     reminders: Optional[List[Reminder]] = None,
     update_pending: bool = False,
-    last_updated_day: str = "",
 ) -> str:
     # Only include fields that affect rendering.
     def _event_payload(e: Event) -> dict:
@@ -378,7 +377,6 @@ def _events_signature(
         "weather_alerts": [a.headline for a in weather_alerts],
         "reminders": [_reminder_payload(r) for r in (reminders or [])],
         "update_pending": update_pending,
-        "last_updated_day": last_updated_day,
     }
     b = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(b).hexdigest()
@@ -417,9 +415,8 @@ def run_once(
         return
 
     # Over-the-air update check. We only *look* here (fetch + compare) so the
-    # status bar can show a pending update and when the program was last
-    # updated; scripts/ota_update.sh is what actually pulls and applies.
-    last_updated = updates.last_updated_dt()
+    # status bar can show that an update is pending; scripts/ota_update.sh is
+    # what actually pulls and applies.
     update_pending = False
     if cfg.auto_update.enabled:
         update_status = updates.check_for_update(branch=cfg.auto_update.branch)
@@ -455,11 +452,10 @@ def run_once(
     show_banner = in_sleep and cfg.sleep.enabled
     wifi_status = get_wifi_status()
     ups_status = get_ups_status()
-    last_updated_day = last_updated.astimezone(tz).strftime("%Y-%m-%d") if last_updated else ""
     sig = _events_signature(
         tz, events, tomorrow_events, weather_alerts, header_date, show_banner,
         wifi_status, ups_status, reminders,
-        update_pending=update_pending, last_updated_day=last_updated_day,
+        update_pending=update_pending,
     )
     should_force_hourly = _should_force_hourly_refresh(state, now, timedelta(hours=1))
     print(
@@ -504,7 +500,6 @@ def run_once(
         weather_alerts=weather_alerts,
         reminders=reminders,
         update_pending=update_pending,
-        last_updated=last_updated,
     )
 
     show_on_inky(img, rotate_degrees=cfg.display.rotate_degrees, border=cfg.display.border)
