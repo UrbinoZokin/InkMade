@@ -45,6 +45,11 @@ cd /opt/inkycal
 echo "-- Ensuring Inky library is installed in venv..."
 "$VENV_DIR/bin/pip" install inky[rpi]
 
+# GPIO button support (view toggle / force refresh / force update). lgpio is
+# the pin-factory backend gpiozero uses on current Raspberry Pi OS.
+echo "-- Ensuring GPIO button libraries are installed in venv..."
+"$VENV_DIR/bin/pip" install lgpio
+
 # -------------- Create config.yaml file --------------
 
 echo "-- Creating config.yaml if missing..."
@@ -188,6 +193,11 @@ sudo systemctl enable --now inkycal-deepclean.timer
 # display can be updated remotely without SSH. Disable with:
 #   auto_update.enabled: false  in config.yaml  (or: sudo systemctl disable --now inkycal-update.timer)
 sudo systemctl enable --now inkycal-update.timer
+
+# Physical buttons on the Inky Impression board (view toggle / force refresh
+# / force update). Disable with: buttons.enabled: false in config.yaml
+# (or: sudo systemctl disable --now inkycal-buttons.service)
+sudo systemctl enable --now inkycal-buttons.service
 
 # Quick inky detection (non-fatal)
 # echo "-- Checking Inky detection (non-fatal)..."

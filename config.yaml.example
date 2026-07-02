@@ -55,3 +55,21 @@ auto_update:
   enabled: true
   branch: "main"
   apply_window: "sleep"   # "sleep" = only overnight; "anytime" = as soon as found
+
+# The Inky Impression's 4 built-in buttons (labeled A/B/C/D on the board):
+#   A (pin_view)    - toggle between the daily view and a weekly view
+#                     (next 7 days, event names only, no times)
+#   B (pin_refresh) - force an immediate display refresh
+#   C (pin_unused)  - unused / reserved for future use
+#   D (pin_update)  - force an OTA update check, and apply it right away
+#                     if one is pending (bypasses apply_window)
+# Pin numbers are BCM GPIO numbers. The defaults below match the 13.3"
+# Inky Impression; button C is wired to GPIO25 on that model instead of
+# the GPIO16 used on the smaller 4"/5.7"/7.3" sizes.
+buttons:
+  enabled: true
+  pin_view: 5
+  pin_refresh: 6
+  pin_unused: 25
+  pin_update: 24
+  bounce_time_ms: 300   # debounce window for the physical tactile buttons

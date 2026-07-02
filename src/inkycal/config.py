@@ -58,6 +58,19 @@ class AutoUpdateConfig:
     apply_window: str = "sleep"
 
 @dataclass
+class ButtonsConfig:
+    enabled: bool = True
+    # BCM GPIO pin numbers for the Inky Impression's 4 built-in buttons
+    # (labeled A/B/C/D on the board). Defaults match the 13.3" model, where
+    # button C is wired to GPIO25 instead of the GPIO16 used on the smaller
+    # (4"/5.7"/7.3") Impression sizes.
+    pin_view: int = 5      # A: toggle daily/weekly view
+    pin_refresh: int = 6   # B: force a display refresh
+    pin_unused: int = 25   # C: unused (reserved)
+    pin_update: int = 24   # D: force an OTA update check/apply
+    bounce_time_ms: int = 300
+
+@dataclass
 class AppConfig:
     timezone: str
     poll_interval_minutes: int
@@ -69,6 +82,7 @@ class AppConfig:
     travel: TravelConfig
     weather: WeatherConfig
     auto_update: AutoUpdateConfig = field(default_factory=AutoUpdateConfig)
+    buttons: ButtonsConfig = field(default_factory=ButtonsConfig)
 
 def load_config(path: str) -> AppConfig:
     p = Path(path)
@@ -81,6 +95,7 @@ def load_config(path: str) -> AppConfig:
     travel = data.get("travel", {})
     weather = data.get("weather", {})
     auto_update = data.get("auto_update", {})
+    buttons = data.get("buttons", {})
 
     google = calendars.get("google", {})
     icloud = calendars.get("icloud", {})
@@ -129,5 +144,13 @@ def load_config(path: str) -> AppConfig:
             enabled=bool(auto_update.get("enabled", True)),
             branch=str(auto_update.get("branch", "main")),
             apply_window=str(auto_update.get("apply_window", "sleep")).strip().lower(),
+        ),
+        buttons=ButtonsConfig(
+            enabled=bool(buttons.get("enabled", True)),
+            pin_view=int(buttons.get("pin_view", 5)),
+            pin_refresh=int(buttons.get("pin_refresh", 6)),
+            pin_unused=int(buttons.get("pin_unused", 25)),
+            pin_update=int(buttons.get("pin_update", 24)),
+            bounce_time_ms=int(buttons.get("bounce_time_ms", 300)),
         ),
     )

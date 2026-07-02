@@ -27,6 +27,8 @@ APP_DIR="${APP_DIR:-/opt/inkycal}"
 VENV_DIR="$APP_DIR/venv"
 PY="$VENV_DIR/bin/python"
 PIP="$VENV_DIR/bin/pip"
+STATE_DIR="${STATE_DIR:-/var/lib/inkycal}"
+FORCE_UPDATE_FLAG="$STATE_DIR/force_update"
 
 log() { echo "[ota-update] $*"; }
 
@@ -124,6 +126,16 @@ $(cfg_eval)
 EOF
 BRANCH="${OTA_BRANCH:-$CFG_BRANCH}"
 
+# The force-update button (see inkycal.buttons) drops this flag file to
+# bypass the apply_window gate and apply a pending update immediately. It's
+# a one-shot trigger: always consume it here so it can't linger and force
+# a future *scheduled* check to apply outside its normal window.
+if [ -f "$FORCE_UPDATE_FLAG" ]; then
+  log "Force-update flag present; applying regardless of apply_window."
+  SHOULD_APPLY=true
+  rm -f "$FORCE_UPDATE_FLAG"
+fi
+
 case "$ENABLED" in
   true|True|1|yes) ;;
   *)
@@ -203,12 +215,22 @@ if printf '%s\n' "$CHANGED" | grep -q '^systemd/'; then
   systemctl daemon-reload
   systemctl enable inkycal.timer inkycal-deepclean.timer inkycal-update.timer \
     >/dev/null 2>&1 || true
+  # --now here (unlike the timers above): a device that gets this feature via
+  # OTA rather than a fresh install.sh run has never had this unit running,
+  # so plain `enable` would only symlink it for next boot.
+  systemctl enable --now inkycal-buttons.service >/dev/null 2>&1 || true
 fi
 
 # Restart the long-running provisioning agent so it picks up new code.
 if systemctl is-active --quiet inkycal-provisioning.service; then
   log "Restarting provisioning agent..."
   systemctl restart inkycal-provisioning.service || true
+fi
+
+# Restart the button daemon so it picks up new code (e.g. new pin config).
+if systemctl is-active --quiet inkycal-buttons.service; then
+  log "Restarting buttons daemon..."
+  systemctl restart inkycal-buttons.service || true
 fi
 
 # Trigger an immediate re-render with the new code. --no-block so we don't wait
