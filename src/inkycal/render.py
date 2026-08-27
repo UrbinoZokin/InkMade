@@ -854,8 +854,14 @@ def render_weekly_schedule(
             # naturally re-surfaces it on each overlapping day. Expand it
             # across every day of the display range it spans instead of
             # only its start day. `end` is exclusive (matches _today_range).
-            span_start = max(e.start.astimezone(tz).date(), today)
-            span_end = min(e.end.astimezone(tz).date(), last_day + timedelta(days=1))
+            event_start = e.start.astimezone(tz).date()
+            event_end = e.end.astimezone(tz).date()
+            if event_end <= event_start:
+                # Defensive: a feed that reports an inclusive or zero-length
+                # end would otherwise drop the event from every day.
+                event_end = event_start + timedelta(days=1)
+            span_start = max(event_start, today)
+            span_end = min(event_end, last_day + timedelta(days=1))
             day_cursor = span_start
             while day_cursor < span_end:
                 events_by_day.setdefault(day_cursor, []).append(e)

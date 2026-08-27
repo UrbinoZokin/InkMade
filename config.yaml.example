@@ -32,6 +32,11 @@ calendars:
     # Google sign-in flow if your existing token predates this.
     tasks_enabled: true
     task_list_allowlist: []  # empty means all task lists
+    # Birthdays (and anniversaries) that Google derives from your Google
+    # Contacts live in their own read-only calendar. Leave this on to show
+    # them alongside your other events — no extra OAuth scope is needed, and
+    # the calendar is simply skipped if the account doesn't have one.
+    birthdays_enabled: true
   icloud:
     enabled: true
     calendar_name_allowlist: []  # empty means all discovered calendars

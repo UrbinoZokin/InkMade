@@ -31,6 +31,9 @@ class GoogleConfig:
     calendar_ids: List[str]
     tasks_enabled: bool = True
     task_list_allowlist: List[str] = field(default_factory=list)
+    # Include the read-only calendar Google builds from Google Contacts
+    # birthdays (and anniversaries). Needs no extra OAuth scope.
+    birthdays_enabled: bool = True
 
 @dataclass
 class ICloudConfig:
@@ -126,6 +129,7 @@ def load_config(path: str) -> AppConfig:
             calendar_ids=list(google.get("calendar_ids", ["primary"])),
             tasks_enabled=bool(google.get("tasks_enabled", True)),
             task_list_allowlist=list(google.get("task_list_allowlist", [])),
+            birthdays_enabled=bool(google.get("birthdays_enabled", True)),
         ),
         icloud=ICloudConfig(
             enabled=bool(icloud.get("enabled", True)),

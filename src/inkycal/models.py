@@ -10,6 +10,7 @@ class Event:
     start: datetime             # timezone-aware
     end: datetime               # timezone-aware
     all_day: bool = False
+    birthday: bool = False      # from a contacts-populated birthday calendar
     location: Optional[str] = None
     travel_time_text: Optional[str] = None
     weather_icon: Optional[str] = None
