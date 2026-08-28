@@ -78,3 +78,7 @@ buttons:
   pin_unused: 25
   pin_update: 24
   bounce_time_ms: 300   # debounce window for the physical tactile buttons
+  # Echo every press to the terminals of anyone logged in over SSH (and to
+  # the local console), so you can see which button was pressed without
+  # tailing the journal. Set to false to keep presses in the journal only.
+  echo_to_terminals: true

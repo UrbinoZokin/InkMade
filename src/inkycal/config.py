@@ -72,6 +72,9 @@ class ButtonsConfig:
     pin_unused: int = 25   # C: unused (reserved)
     pin_update: int = 24   # D: force an OTA update check/apply
     bounce_time_ms: int = 300
+    # Echo each press to the terminals of anyone logged in (SSH sessions and
+    # the local console), so a press is visible without tailing the journal.
+    echo_to_terminals: bool = True
 
 @dataclass
 class AppConfig:
@@ -156,5 +159,6 @@ def load_config(path: str) -> AppConfig:
             pin_unused=int(buttons.get("pin_unused", 25)),
             pin_update=int(buttons.get("pin_update", 24)),
             bounce_time_ms=int(buttons.get("bounce_time_ms", 300)),
+            echo_to_terminals=bool(buttons.get("echo_to_terminals", True)),
         ),
     )

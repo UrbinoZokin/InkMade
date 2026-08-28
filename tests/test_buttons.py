@@ -101,3 +101,83 @@ def test_trigger_force_update_writes_flag_file_and_starts_service(tmp_path, monk
     assert cmd == ["systemctl", "start", "--no-block", "inkycal-update.service"]
     assert kwargs["check"] is False
     assert (tmp_path / buttons.FORCE_UPDATE_FLAG_NAME).exists()
+
+
+def test_logged_in_terminals_parses_who_output(monkeypatch):
+    who_output = (
+        "pi       pts/0        2026-08-28 09:14 (192.168.1.20)\n"
+        "pi       pts/1        2026-08-28 09:20 (192.168.1.31)\n"
+        "root     tty1         2026-08-28 08:02\n"
+    )
+    monkeypatch.setattr(
+        buttons.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=0, stdout=who_output)
+    )
+
+    assert buttons._logged_in_terminals() == ["/dev/pts/0", "/dev/pts/1", "/dev/tty1"]
+
+
+def test_logged_in_terminals_dedupes_repeated_devices(monkeypatch):
+    who_output = "pi  pts/0  2026-08-28 09:14\npi  pts/0  2026-08-28 09:14\n\n"
+    monkeypatch.setattr(
+        buttons.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=0, stdout=who_output)
+    )
+
+    assert buttons._logged_in_terminals() == ["/dev/pts/0"]
+
+
+def test_logged_in_terminals_falls_back_to_open_ptys_when_who_unavailable(monkeypatch):
+    def boom(*a, **kw):
+        raise FileNotFoundError("who")
+
+    monkeypatch.setattr(buttons.subprocess, "run", boom)
+    monkeypatch.setattr(buttons.glob, "glob", lambda pattern: ["/dev/pts/3", "/dev/pts/ptmx", "/dev/pts/1"])
+
+    # ptmx is the multiplexer, not somebody's terminal.
+    assert buttons._logged_in_terminals() == ["/dev/pts/1", "/dev/pts/3"]
+
+
+def test_broadcast_writes_message_to_every_logged_in_terminal(tmp_path, monkeypatch):
+    first = tmp_path / "pts0"
+    second = tmp_path / "pts1"
+    first.touch()
+    second.touch()
+    monkeypatch.setattr(buttons, "_logged_in_terminals", lambda: [str(first), str(second)])
+
+    buttons._broadcast("Button A (view) pressed")
+
+    for device in (first, second):
+        # Bytes, not read_text(): \r\n keeps the line flush left even on a
+        # terminal in raw mode, and universal newlines would hide the \r.
+        assert device.read_bytes() == b"\r\n[InkyCal] Button A (view) pressed\r\n"
+
+
+def test_broadcast_skips_terminals_that_cannot_be_written(tmp_path, monkeypatch):
+    reachable = tmp_path / "pts0"
+    reachable.touch()
+    monkeypatch.setattr(
+        buttons, "_logged_in_terminals", lambda: [str(tmp_path / "logged-out"), str(reachable)]
+    )
+
+    buttons._broadcast("Button D (update) pressed")
+
+    assert b"Button D (update) pressed" in reachable.read_bytes()
+
+
+def test_announce_logs_and_echoes_when_enabled(monkeypatch, capsys):
+    broadcast = []
+    monkeypatch.setattr(buttons, "_broadcast", broadcast.append)
+
+    buttons._announce("Button B (refresh) pressed", echo=True)
+
+    assert "Button B (refresh) pressed" in capsys.readouterr().out
+    assert broadcast == ["Button B (refresh) pressed"]
+
+
+def test_announce_stays_in_the_journal_when_echo_disabled(monkeypatch, capsys):
+    broadcast = []
+    monkeypatch.setattr(buttons, "_broadcast", broadcast.append)
+
+    buttons._announce("Button C pressed: no function assigned", echo=False)
+
+    assert "Button C pressed" in capsys.readouterr().out
+    assert broadcast == []

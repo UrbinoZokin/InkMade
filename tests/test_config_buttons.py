@@ -41,3 +41,22 @@ def test_buttons_can_be_overridden_and_disabled(tmp_path):
     assert cfg.buttons.pin_unused == 22
     assert cfg.buttons.pin_update == 23
     assert cfg.buttons.bounce_time_ms == 150
+
+
+def test_buttons_echo_to_terminals_defaults_on_and_can_be_disabled(tmp_path):
+    default_path = tmp_path / "default.yaml"
+    default_path.write_text("timezone: 'America/Phoenix'\n", encoding="utf-8")
+
+    assert load_config(str(default_path)).buttons.echo_to_terminals is True
+
+    off_path = tmp_path / "off.yaml"
+    off_path.write_text(
+        """
+        timezone: 'America/Phoenix'
+        buttons:
+          echo_to_terminals: false
+        """,
+        encoding="utf-8",
+    )
+
+    assert load_config(str(off_path)).buttons.echo_to_terminals is False

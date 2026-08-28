@@ -23,6 +23,7 @@ PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather
 - Weekly deep clean refresh to reduce ghosting  
 - Over-the-air updates (pulls new code from GitHub on its own — no SSH)  
 - Physical buttons: switch daily/weekly view, force refresh, force update  
+- Button presses echo live to any SSH session (and the local console)  
 - Fully automated install with virtualenv (no externally-managed errors)  
 - systemd timers for reliability  
 
@@ -46,6 +47,21 @@ D asks `inkycal-update.service` to check GitHub and, if the checkout is
 behind, apply the update immediately instead of waiting for the next
 scheduled window.
 
+### Watching presses over SSH
+
+Every press is echoed to the terminals of everyone logged in, so if you're
+SSH'd into the Pi you'll see the button announce itself as it's pressed:
+
+```
+[InkyCal] Button A (view) pressed: toggling daily/weekly view
+```
+
+Nothing to run or leave open — the line arrives in your shell (and on the
+local console) as it happens, including for button C, which has no function
+assigned. Presses always go to the journal too
+(`journalctl -u inkycal-buttons -f`); set `echo_to_terminals: false` if you'd
+rather have them there only.
+
 Handled by `inkycal-buttons.service`, installed and enabled automatically by
 `scripts/install.sh`. Configure it in `config.yaml`:
 
@@ -57,6 +73,7 @@ buttons:
   pin_unused: 25
   pin_update: 24
   bounce_time_ms: 300
+  echo_to_terminals: true
 ```
 
 Pin numbers are BCM GPIO numbers. The defaults match the 13.3" Inky
