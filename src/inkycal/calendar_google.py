@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from zoneinfo import ZoneInfo
 import os
 
@@ -8,7 +8,13 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
+from .calendar_common import normalize_all_day_bounds
 from .models import Event
+
+# Google exposes the birthdays it derives from Google Contacts as a
+# read-only calendar with this fixed id. It needs no extra OAuth scope beyond
+# calendar.readonly, and it is not returned as part of "primary".
+CONTACTS_BIRTHDAY_CALENDAR_ID = "addressbook#contacts@group.v.calendar.google.com"
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar.readonly",
@@ -54,6 +60,62 @@ def _persist_token(token_path: str, creds: Credentials) -> None:
         f.write(creds.to_json())
 
 
+def _is_birthday(item: dict, calendar_id: str) -> bool:
+    # Google tags contact birthdays/anniversaries with eventType "birthday";
+    # older responses from the contacts calendar carry no eventType at all, so
+    # fall back to the calendar the item came from.
+    if item.get("eventType") == "birthday":
+        return True
+    return calendar_id == CONTACTS_BIRTHDAY_CALENDAR_ID
+
+
+def _parse_google_event(item: dict, tz: ZoneInfo, calendar_id: str) -> Optional[Event]:
+    start_obj = item.get("start", {})
+    end_obj = item.get("end", {})
+
+    if "date" in start_obj:
+        start = datetime.fromisoformat(start_obj["date"]).replace(tzinfo=tz)
+        raw_end = end_obj.get("date")
+        end = datetime.fromisoformat(raw_end).replace(tzinfo=tz) if raw_end else None
+        start, end = normalize_all_day_bounds(start, end, tz)
+        all_day = True
+    elif "dateTime" in start_obj and "dateTime" in end_obj:
+        start = datetime.fromisoformat(start_obj["dateTime"]).astimezone(tz)
+        end = datetime.fromisoformat(end_obj["dateTime"]).astimezone(tz)
+        all_day = False
+    else:
+        # Cancelled instances of a recurring event come back without times.
+        return None
+
+    return Event(
+        source="google",
+        title=item.get("summary") or "(No title)",
+        start=start,
+        end=end,
+        all_day=all_day,
+        birthday=_is_birthday(item, calendar_id),
+        location=item.get("location"),
+    )
+
+
+def _list_calendar_events(service, calendar_id: str, time_min: str, time_max: str) -> List[dict]:
+    items: List[dict] = []
+    page_token = None
+    while True:
+        resp = service.events().list(
+            calendarId=calendar_id,
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy="startTime",
+            pageToken=page_token,
+        ).execute()
+        items.extend(resp.get("items", []))
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            return items
+
+
 def fetch_google_events(
     calendar_ids: List[str],
     day_start: datetime,
@@ -69,37 +131,17 @@ def fetch_google_events(
     time_max = day_end.isoformat()
 
     for cal_id in calendar_ids:
-        resp = service.events().list(
-            calendarId=cal_id,
-            timeMin=time_min,
-            timeMax=time_max,
-            singleEvents=True,
-            orderBy="startTime",
-        ).execute()
+        try:
+            items = _list_calendar_events(service, cal_id, time_min, time_max)
+        except Exception as e:
+            # One unreadable calendar (a stale id, or a birthday calendar the
+            # account doesn't have) must not cost us every other calendar.
+            print(f"Google Calendar '{cal_id}' fetch failed; skipping it. Error: {e}")
+            continue
 
-        for item in resp.get("items", []):
-            title = item.get("summary", "(No title)")
-            location = item.get("location")
-
-            start_obj = item.get("start", {})
-            end_obj = item.get("end", {})
-
-            if "date" in start_obj:
-                start = datetime.fromisoformat(start_obj["date"]).replace(tzinfo=tz)
-                end = datetime.fromisoformat(end_obj["date"]).replace(tzinfo=tz)
-                all_day = True
-            else:
-                start = datetime.fromisoformat(start_obj["dateTime"]).astimezone(tz)
-                end = datetime.fromisoformat(end_obj["dateTime"]).astimezone(tz)
-                all_day = False
-
-            events.append(Event(
-                source="google",
-                title=title,
-                start=start,
-                end=end,
-                all_day=all_day,
-                location=location,
-            ))
+        for item in items:
+            event = _parse_google_event(item, tz, cal_id)
+            if event is not None:
+                events.append(event)
 
     return events

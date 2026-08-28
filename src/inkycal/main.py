@@ -11,7 +11,8 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-from .calendar_google import fetch_google_events
+from .calendar_common import clip_events_to_range
+from .calendar_google import CONTACTS_BIRTHDAY_CALENDAR_ID, fetch_google_events
 from .calendar_icloud import fetch_icloud_events
 from .config import load_config
 from .display_inky import show_on_inky
@@ -112,28 +113,60 @@ def _dedupe_events(events: List[Event]) -> List[Event]:
     return deduped
 
 
+_BIRTHDAY_TITLE_RE = re.compile(r"^(.*?)['\u2019]s\s+birthday$", re.IGNORECASE)
+
+
+def _birthday_label(title: str) -> str:
+    # "Jane Doe's birthday" reads better as just "Jane Doe" once the row itself
+    # is labeled "Birthdays"; anything shaped differently is left alone.
+    stripped = title.strip()
+    match = _BIRTHDAY_TITLE_RE.match(stripped)
+    if match and match.group(1).strip():
+        return match.group(1).strip()
+    return stripped
+
+
+def _merge_group(events: List[Event], prefix: str, empty_title: str) -> Event:
+    labels = [t for t in (e.title.strip() for e in events) if t]
+    labels.sort(key=str.lower)
+    title = (f"{prefix}: " + " • ".join(labels)) if labels else empty_title
+    return Event(
+        source="merged",
+        title=title,
+        start=min(e.start for e in events),
+        end=max(e.end for e in events),
+        all_day=True,
+        birthday=all(e.birthday for e in events),
+    )
+
+
 def _merge_all_day_events(events: List[Event]) -> List[Event]:
     all_day_events = [e for e in events if e.all_day]
     timed_events = [e for e in events if not e.all_day]
     if not all_day_events:
         return sorted(timed_events, key=_event_sort_key)
 
-    sorted_titles = [e.title.strip() for e in all_day_events if e.title.strip()]
-    sorted_titles.sort(key=str.lower)
-    if sorted_titles:
-        summary_title = "All-day: " + " • ".join(sorted_titles)
-    else:
-        summary_title = "All-day events"
+    birthdays = [e for e in all_day_events if e.birthday]
+    others = [e for e in all_day_events if not e.birthday]
 
-    merged = Event(
-        source="merged",
-        title=summary_title,
-        start=min(e.start for e in all_day_events),
-        end=max(e.end for e in all_day_events),
-        all_day=True,
-    )
+    merged: List[Event] = []
+    if others:
+        merged.append(_merge_group(others, "All-day", "All-day events"))
+    if birthdays:
+        named = [
+            Event(
+                source=e.source,
+                title=_birthday_label(e.title),
+                start=e.start,
+                end=e.end,
+                all_day=True,
+                birthday=True,
+            )
+            for e in birthdays
+        ]
+        merged.append(_merge_group(named, "Birthdays", "Birthdays"))
 
-    return [merged, *sorted(timed_events, key=_event_sort_key)]
+    return [*merged, *sorted(timed_events, key=_event_sort_key)]
 
 
 def _apply_travel_times(events: List[Event], origin_address: str, back_to_back_window_minutes: int) -> List[Event]:
@@ -247,13 +280,20 @@ def _process_events(events: List[Event], travel_enabled: bool, origin_address: s
     return processed
 
 
+def _google_calendar_ids(cfg) -> List[str]:
+    ids = list(cfg.google.calendar_ids)
+    if getattr(cfg.google, "birthdays_enabled", True) and CONTACTS_BIRTHDAY_CALENDAR_ID not in ids:
+        ids.append(CONTACTS_BIRTHDAY_CALENDAR_ID)
+    return ids
+
+
 def _fetch_raw_events(cfg, range_start: datetime, range_end: datetime, tz: ZoneInfo) -> List[Event]:
     events: List[Event] = []
     if cfg.google.enabled:
         token_path = os.environ.get("GOOGLE_TOKEN_JSON", "")
         if token_path:
             try:
-                events.extend(fetch_google_events(cfg.google.calendar_ids, range_start, range_end, tz, token_path))
+                events.extend(fetch_google_events(_google_calendar_ids(cfg), range_start, range_end, tz, token_path))
             except Exception as e:
                 print(f"Google Calendar fetch failed; continuing without Google events. Error: {e}")
         else:
@@ -270,7 +310,10 @@ def _fetch_raw_events(cfg, range_start: datetime, range_end: datetime, tz: ZoneI
         except Exception as e:
             print(f"iCloud fetch failed; continuing without iCloud. Error: {e}")
 
-    return events
+    # Both backends hand back all-day events that merely touch the requested
+    # window (see calendar_common.event_overlaps_range), which is what made a
+    # one-day all-day event show up on two days. Clip to the window we asked for.
+    return clip_events_to_range(events, range_start, range_end, tz)
 
 
 def _fetch_events_for_range(cfg, range_start: datetime, range_end: datetime, tz: ZoneInfo) -> List[Event]:

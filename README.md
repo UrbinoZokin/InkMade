@@ -14,6 +14,7 @@ PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather
 
 - Google Calendar + Apple iCloud (CalDAV) sync  
 - Google Tasks shown as a separate “Reminders” region (due today + overdue)  
+- Contact birthdays from Google's Contacts calendar, grouped on their own row  
 - Sorted by start time (all-day events first)  
 - Portrait layout for 13.3" display  
 - Updates every 15 minutes  
@@ -180,6 +181,17 @@ The Pi runs headless, so the OAuth consent flow happens on another machine.
 2. Copy `google_token.json` to the Pi at the path referenced by
    `GOOGLE_TOKEN_JSON` in `/opt/inkycal/.env`
    (default: `/opt/inkycal/secrets/google_token.json`).
+
+> **Birthdays:** Google keeps the birthdays it derives from Google Contacts in
+> a separate read-only calendar
+> (`addressbook#contacts@group.v.calendar.google.com`), which is not part of
+> `primary`. InkyCal adds it automatically — it needs no OAuth scope beyond the
+> `calendar.readonly` the token already has — and the day's birthdays render as
+> their own “Birthdays: …” row. Turn it off with
+> `calendars.google.birthdays_enabled: false`. Apple does **not** publish the
+> equivalent iCloud Contacts birthday calendar over CalDAV (it is generated
+> on-device), so iCloud birthdays only appear if you keep them in a real
+> calendar — one named “Birthdays” is picked up and grouped the same way.
 
 > **Reminders / Google Tasks:** the token now requests both
 > `calendar.readonly` and `tasks.readonly`. If you generated your token before
