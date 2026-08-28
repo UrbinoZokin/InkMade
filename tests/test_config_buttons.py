@@ -60,3 +60,22 @@ def test_buttons_echo_to_terminals_defaults_on_and_can_be_disabled(tmp_path):
     )
 
     assert load_config(str(off_path)).buttons.echo_to_terminals is False
+
+
+def test_buttons_press_feedback_defaults_to_banner_and_is_normalised(tmp_path):
+    default_path = tmp_path / "default.yaml"
+    default_path.write_text("timezone: 'America/Phoenix'\n", encoding="utf-8")
+
+    assert load_config(str(default_path)).buttons.press_feedback == "banner"
+
+    wipe_path = tmp_path / "wipe.yaml"
+    wipe_path.write_text(
+        """
+        timezone: 'America/Phoenix'
+        buttons:
+          press_feedback: "  Wipe  "
+        """,
+        encoding="utf-8",
+    )
+
+    assert load_config(str(wipe_path)).buttons.press_feedback == "wipe"

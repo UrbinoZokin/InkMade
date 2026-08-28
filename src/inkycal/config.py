@@ -75,6 +75,11 @@ class ButtonsConfig:
     # Echo each press to the terminals of anyone logged in (SSH sessions and
     # the local console), so a press is visible without tailing the journal.
     echo_to_terminals: bool = True
+    # On-display acknowledgement of a press, shown before the (slow) fetch and
+    # render it triggers: "banner" keeps the last frame and puts a notice bar
+    # on top, "wipe" clears the panel to a centred message, "none" leaves the
+    # display alone. Anything on-panel costs one extra full refresh.
+    press_feedback: str = "banner"
 
 @dataclass
 class AppConfig:
@@ -160,5 +165,6 @@ def load_config(path: str) -> AppConfig:
             pin_update=int(buttons.get("pin_update", 24)),
             bounce_time_ms=int(buttons.get("bounce_time_ms", 300)),
             echo_to_terminals=bool(buttons.get("echo_to_terminals", True)),
+            press_feedback=str(buttons.get("press_feedback", "banner")).strip().lower(),
         ),
     )

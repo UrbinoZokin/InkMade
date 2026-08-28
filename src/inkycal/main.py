@@ -16,6 +16,7 @@ from .calendar_google import CONTACTS_BIRTHDAY_CALENDAR_ID, fetch_google_events
 from .calendar_icloud import fetch_icloud_events
 from .config import load_config
 from .display_inky import show_on_inky
+from .feedback import save_last_frame
 from .models import Event, Reminder
 from .network import get_ups_status, get_wifi_status
 from .reminders_google import fetch_google_tasks
@@ -613,6 +614,9 @@ def run_once(
         )
 
     show_on_inky(img, rotate_degrees=cfg.display.rotate_degrees, border=cfg.display.border)
+    # Keep a copy of what's on the panel so a button press can redraw it with a
+    # "working on it" bar instead of blanking the screen (see inkycal.feedback).
+    save_last_frame(state_path, img)
 
     state.last_hash = sig
     state.last_rendered_iso = now.isoformat()

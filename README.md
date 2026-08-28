@@ -23,6 +23,7 @@ PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather
 - Weekly deep clean refresh to reduce ghosting  
 - Over-the-air updates (pulls new code from GitHub on its own — no SSH)  
 - Physical buttons: switch daily/weekly view, force refresh, force update  
+- Presses are acknowledged on the display before the slow work starts  
 - Button presses echo live to any SSH session (and the local console)  
 - Fully automated install with virtualenv (no externally-managed errors)  
 - systemd timers for reliability  
@@ -46,6 +47,38 @@ periodic timer, so credentials and file ownership stay consistent. Pressing
 D asks `inkycal-update.service` to check GitHub and, if the checkout is
 behind, apply the update immediately instead of waiting for the next
 scheduled window.
+
+### Seeing that a press registered
+
+A press can't draw anything until it has fetched calendars, weather and
+travel times — 10–60 seconds during which the panel sits completely still.
+So before that work starts, the display puts up a short notice: *Switching
+view… please wait*, *Refreshing… please wait* or *Checking for updates…
+please wait*. The panel begins its visible flash a few seconds after the
+press, which is the acknowledgement; the real content lands when the fetch
+finishes, and for button D when the update run finishes (so the notice stays
+up for the whole install).
+
+A press that arrives while the previous one is still being acted on is
+dropped, not queued — somebody pressing again because they aren't sure the
+first press worked wants that press to have worked, not a second refresh
+behind it. Without that, four impatient presses would mean four full flash
+cycles back to back, which looks exactly like the malfunction they were
+worried about. The extra presses show up in the journal (and in any SSH
+session) as ignored.
+
+The Impression has no partial refresh, so this costs one extra full-panel
+repaint — content arrives roughly twice as slowly as before. Pick the trade
+with `press_feedback` in `config.yaml`:
+
+| Value | Behaviour |
+| --- | --- |
+| `banner` (default) | Keep the schedule on screen with a notice bar across the top |
+| `wipe` | Clear the panel to a centred message |
+| `none` | No acknowledgement — the display stays put until the new content is ready |
+
+Button C shows nothing: no work follows it, so a notice would spend a full
+refresh announcing that nothing happened.
 
 ### Watching presses over SSH
 
@@ -74,6 +107,7 @@ buttons:
   pin_update: 24
   bounce_time_ms: 300
   echo_to_terminals: true
+  press_feedback: "banner"   # banner | wipe | none
 ```
 
 Pin numbers are BCM GPIO numbers. The defaults match the 13.3" Inky

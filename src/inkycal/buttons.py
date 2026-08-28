@@ -10,6 +10,13 @@ touches the display, calendar credentials, or state file directly.
   C (pin_unused)  - reserved, no handler
   D (pin_update)  - force an OTA update check/apply (bypasses apply_window)
 
+Because the display cannot say anything until the fetch behind a press has
+finished -- 10-60 s of a completely still panel -- every press that does work
+first paints a short "working on it" notice via inkycal.feedback, so you can
+see the press landed. See `buttons.press_feedback` in config.yaml to change
+its style or turn it off. Presses arriving while that work is still running
+are dropped rather than queued, so impatient repeat presses cost nothing.
+
 Every press is also echoed to the terminals of anyone currently logged in
 (SSH sessions and the local console), so you can watch which button someone
 pressed without tailing the journal. Set `buttons.echo_to_terminals: false`
@@ -18,9 +25,10 @@ in config.yaml to keep presses in the journal only.
 For the view-toggle and refresh buttons, this drops privileges to the app
 directory's owner and re-runs the normal `inkycal.main` entrypoint, exactly
 like the periodic timer does, so the acting user, file ownership, and code
-path all match a regular scheduled run. For the update button, it just asks
-systemd to start the existing update service, which already runs as root and
-knows how to apply an update safely.
+path all match a regular scheduled run. For the update button, it asks systemd
+to start the existing update service -- which already runs as root and knows
+how to apply an update safely -- waits for it to finish, and then re-renders so
+the notice comes back off the panel.
 """
 from __future__ import annotations
 
@@ -28,10 +36,12 @@ import glob
 import os
 import pwd
 import subprocess
+import threading
 
 from dotenv import dotenv_values
 
 from .config import load_config
+from .feedback import STYLE_NONE, resolve_style
 from .main import CONFIG_PATH_DEFAULT, STATE_PATH_DEFAULT
 from .updates import DEFAULT_APP_DIR
 
@@ -40,6 +50,23 @@ from .updates import DEFAULT_APP_DIR
 # flag file (instead of an env var) means ota_update.sh only needs plain
 # `systemctl start`, which is all that's actually supported.
 FORCE_UPDATE_FLAG_NAME = "force_update"
+
+# A press-acknowledgement is one full-panel refresh; on the 13.3" Impression
+# that is well under a minute. Cap it so a wedged SPI transfer can't hold the
+# handler thread (and therefore the actual work) forever.
+FEEDBACK_TIMEOUT_S = 180
+
+# The OTA service pulls, reinstalls dependencies and restarts units, so it can
+# legitimately run for several minutes. Past this we stop waiting to put the
+# display back and leave that to the periodic timer.
+UPDATE_TIMEOUT_S = 900
+
+# Held for as long as a press is being acted on. Someone who presses again
+# while the panel is mid-refresh is telling us the first press hasn't visibly
+# landed yet -- not asking for a second refresh behind it. Without this, those
+# presses queue and the display flashes through one full cycle per press, which
+# looks exactly like the malfunction they were worried about.
+_WORK_LOCK = threading.Lock()
 
 
 def _app_owner_ids(app_dir: str) -> tuple[int, int]:
@@ -129,33 +156,108 @@ def _announce(message: str, *, echo: bool) -> None:
         _broadcast(message)
 
 
-def _run_main(app_dir: str, config_path: str, state_path: str, *, toggle_view: bool) -> None:
+def _run_as_app_user(app_dir: str, module: str, args: list[str], timeout: float | None = None):
+    """Run `python -m <module>` from the app's venv as the app directory's owner.
+
+    Matches how the periodic timer runs the same code, so the acting user, file
+    ownership and code path are identical to a regular scheduled run.
+    """
     uid, gid = _app_owner_ids(app_dir)
     groups = _app_owner_groups(uid, gid)
     venv_python = os.path.join(app_dir, "venv", "bin", "python")
-    cmd = [venv_python, "-m", "inkycal.main", "--config", config_path, "--state", state_path, "--force"]
-    if toggle_view:
-        cmd.append("--toggle-view")
-    result = subprocess.run(
-        cmd, cwd=app_dir, user=uid, group=gid, extra_groups=groups, env=_spawn_env(app_dir), check=False
+    return subprocess.run(
+        [venv_python, "-m", module, *args],
+        cwd=app_dir,
+        user=uid,
+        group=gid,
+        extra_groups=groups,
+        env=_spawn_env(app_dir),
+        check=False,
+        timeout=timeout,
     )
+
+
+def _show_feedback(app_dir: str, config_path: str, state_path: str, message: str, *, echo: bool) -> None:
+    """Acknowledge a press on the panel itself, before the slow work starts.
+
+    Never fatal: this is only an acknowledgement, so a display that refuses it
+    must not stop the refresh (or update) the user actually asked for.
+    """
+    try:
+        result = _run_as_app_user(
+            app_dir,
+            "inkycal.feedback",
+            ["--config", config_path, "--state", state_path, "--message", message],
+            timeout=FEEDBACK_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        _announce(f"Press feedback timed out after {FEEDBACK_TIMEOUT_S}s; continuing", echo=echo)
+        return
+    except Exception as e:
+        _announce(f"Press feedback failed: {e}; continuing", echo=echo)
+        return
+    if result.returncode != 0:
+        print(f"inkycal.feedback exited with code {result.returncode}")
+
+
+def _run_main(app_dir: str, config_path: str, state_path: str, *, toggle_view: bool) -> None:
+    args = ["--config", config_path, "--state", state_path, "--force"]
+    if toggle_view:
+        args.append("--toggle-view")
+    result = _run_as_app_user(app_dir, "inkycal.main", args)
     if result.returncode != 0:
         print(f"inkycal.main exited with code {result.returncode}")
 
 
-def _trigger_force_update(state_path: str) -> None:
+def _trigger_force_update(state_path: str) -> bool:
+    """Run the update service to completion. True if it finished within the wait.
+
+    Unlike the periodic check this blocks (no --no-block): the display is
+    currently showing a "checking for updates" notice, and knowing when the
+    check is done is what lets us take that notice back off. Two ways we may
+    not see the end of it: the run takes longer than UPDATE_TIMEOUT_S, or it
+    applied an update that changed systemd/ and restarted this very daemon
+    from under us. Both are covered -- ota_update.sh triggers its own render
+    after applying, and the notice clears the stored render hash so the next
+    scheduled run repaints regardless.
+    """
     flag_path = os.path.join(os.path.dirname(state_path) or ".", FORCE_UPDATE_FLAG_NAME)
     try:
         open(flag_path, "w").close()
     except OSError as e:
         print(f"Could not write force-update flag at {flag_path}: {e}")
 
-    result = subprocess.run(
-        ["systemctl", "start", "--no-block", "inkycal-update.service"],
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["systemctl", "start", "inkycal-update.service"],
+            check=False,
+            timeout=UPDATE_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"inkycal-update.service still running after {UPDATE_TIMEOUT_S}s; not waiting any longer")
+        return False
     if result.returncode != 0:
         print(f"systemctl start inkycal-update.service exited with code {result.returncode}")
+    return True
+
+
+def _run_guarded(label: str, action, *, echo: bool) -> bool:
+    """Act on one press, ignoring it if the previous press is still being acted on.
+
+    Returns False when the press was ignored. Failures inside `action` are
+    announced rather than raised: gpiozero would otherwise swallow them into a
+    background thread, and the lock must be released either way.
+    """
+    if not _WORK_LOCK.acquire(blocking=False):
+        _announce(f"{label}: already working on the previous press; ignoring this one", echo=echo)
+        return False
+    try:
+        action()
+    except Exception as e:
+        _announce(f"{label} failed: {e}", echo=echo)
+    finally:
+        _WORK_LOCK.release()
+    return True
 
 
 def main() -> None:
@@ -174,6 +276,14 @@ def main() -> None:
 
     bounce_time = buttons_cfg.bounce_time_ms / 1000
     echo = buttons_cfg.echo_to_terminals
+    # Resolved once here so a press with feedback turned off doesn't pay for a
+    # process spawn just to have it decide there is nothing to draw.
+    feedback_style = resolve_style(buttons_cfg.press_feedback)
+    feedback_on = feedback_style != STYLE_NONE
+
+    def acknowledge(message: str) -> None:
+        if feedback_on:
+            _show_feedback(app_dir, config_path, state_path, message, echo=echo)
 
     btn_view = Button(buttons_cfg.pin_view, pull_up=True, bounce_time=bounce_time)
     btn_refresh = Button(buttons_cfg.pin_refresh, pull_up=True, bounce_time=bounce_time)
@@ -182,27 +292,42 @@ def main() -> None:
 
     def on_view_pressed() -> None:
         _announce("Button A (view) pressed: toggling daily/weekly view", echo=echo)
-        try:
+
+        def work() -> None:
+            acknowledge("Switching view... please wait")
             _run_main(app_dir, config_path, state_path, toggle_view=True)
-        except Exception as e:
-            _announce(f"View toggle failed: {e}", echo=echo)
+
+        _run_guarded("Button A (view)", work, echo=echo)
 
     def on_refresh_pressed() -> None:
         _announce("Button B (refresh) pressed: forcing a display refresh", echo=echo)
-        try:
+
+        def work() -> None:
+            acknowledge("Refreshing... please wait")
             _run_main(app_dir, config_path, state_path, toggle_view=False)
-        except Exception as e:
-            _announce(f"Forced refresh failed: {e}", echo=echo)
+
+        _run_guarded("Button B (refresh)", work, echo=echo)
 
     def on_unused_pressed() -> None:
+        # No work follows, so nothing to acknowledge on the panel: a notice
+        # here would spend a full refresh saying "nothing happened". No guard
+        # either -- there is nothing in flight to protect.
         _announce("Button C pressed: no function assigned", echo=echo)
 
     def on_update_pressed() -> None:
         _announce("Button D (update) pressed: forcing an update check/apply", echo=echo)
-        try:
-            _trigger_force_update(state_path)
-        except Exception as e:
-            _announce(f"Forced update trigger failed: {e}", echo=echo)
+
+        def work() -> None:
+            acknowledge("Checking for updates... please wait")
+            finished = _trigger_force_update(state_path)
+            # The update itself changes nothing on screen unless it applied one
+            # (ota_update.sh renders after that). Either way, re-render so the
+            # notice is replaced -- by the schedule, now including whether an
+            # update is still pending.
+            if finished:
+                _run_main(app_dir, config_path, state_path, toggle_view=False)
+
+        _run_guarded("Button D (update)", work, echo=echo)
 
     btn_view.when_pressed = on_view_pressed
     btn_refresh.when_pressed = on_refresh_pressed
@@ -215,7 +340,8 @@ def main() -> None:
         f"B=GPIO{buttons_cfg.pin_refresh} (refresh) "
         f"C=GPIO{buttons_cfg.pin_unused} (unused) "
         f"D=GPIO{buttons_cfg.pin_update} (update); "
-        f"echo to logged-in terminals {'on' if echo else 'off'}"
+        f"echo to logged-in terminals {'on' if echo else 'off'}; "
+        f"press feedback {feedback_style}"
     )
     pause()
 
