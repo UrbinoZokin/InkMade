@@ -87,20 +87,64 @@ def test_run_main_reports_nonzero_exit(tmp_path, monkeypatch, capsys):
     assert "exited with code 1" in capsys.readouterr().out
 
 
-def test_trigger_force_update_writes_flag_file_and_starts_service(tmp_path, monkeypatch):
+def test_trigger_force_update_writes_flag_file_and_waits_for_the_service(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(
         buttons.subprocess, "run", lambda *a, **kw: calls.append((a, kw)) or SimpleNamespace(returncode=0)
     )
 
     state_path = str(tmp_path / "state.json")
-    buttons._trigger_force_update(state_path)
+    assert buttons._trigger_force_update(state_path) is True
 
     (cmd,), kwargs = calls[0]
     # No --setenv=: systemctl start does not support it (only systemd-run does).
-    assert cmd == ["systemctl", "start", "--no-block", "inkycal-update.service"]
+    # No --no-block either: the display is showing a "checking for updates"
+    # notice, and waiting is what tells us when to take it back off.
+    assert cmd == ["systemctl", "start", "inkycal-update.service"]
     assert kwargs["check"] is False
+    assert kwargs["timeout"] == buttons.UPDATE_TIMEOUT_S
     assert (tmp_path / buttons.FORCE_UPDATE_FLAG_NAME).exists()
+
+
+def test_trigger_force_update_reports_not_finished_when_the_service_outlasts_the_wait(tmp_path, monkeypatch):
+    def timeout(*a, **kw):
+        raise buttons.subprocess.TimeoutExpired(cmd="systemctl", timeout=buttons.UPDATE_TIMEOUT_S)
+
+    monkeypatch.setattr(buttons.subprocess, "run", timeout)
+
+    assert buttons._trigger_force_update(str(tmp_path / "state.json")) is False
+
+
+def test_show_feedback_runs_the_notice_entrypoint_as_the_app_user(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        buttons.subprocess, "run", lambda *a, **kw: calls.append((a, kw)) or SimpleNamespace(returncode=0)
+    )
+    monkeypatch.setattr(buttons, "_spawn_env", lambda app_dir: {})
+    monkeypatch.setattr(buttons, "_app_owner_groups", lambda uid, gid: [gid])
+
+    buttons._show_feedback(str(tmp_path), "config.yaml", "state.json", "Refreshing...", echo=False)
+
+    (cmd,), kwargs = calls[0]
+    assert cmd[1:3] == ["-m", "inkycal.feedback"]
+    assert cmd[-2:] == ["--message", "Refreshing..."]
+    assert kwargs["timeout"] == buttons.FEEDBACK_TIMEOUT_S
+    assert kwargs["user"] == os.stat(tmp_path).st_uid
+
+
+def test_show_feedback_never_blocks_the_work_it_announces(tmp_path, monkeypatch, capsys):
+    def timeout(*a, **kw):
+        raise buttons.subprocess.TimeoutExpired(cmd="python", timeout=buttons.FEEDBACK_TIMEOUT_S)
+
+    monkeypatch.setattr(buttons.subprocess, "run", timeout)
+    monkeypatch.setattr(buttons, "_spawn_env", lambda app_dir: {})
+    monkeypatch.setattr(buttons, "_app_owner_groups", lambda uid, gid: [gid])
+
+    # A display that will not take the notice is not a reason to skip the
+    # refresh: no exception escapes to the button handler.
+    buttons._show_feedback(str(tmp_path), "config.yaml", "state.json", "Refreshing...", echo=False)
+
+    assert "timed out" in capsys.readouterr().out
 
 
 def test_logged_in_terminals_parses_who_output(monkeypatch):
