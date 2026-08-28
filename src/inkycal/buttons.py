@@ -10,6 +10,11 @@ touches the display, calendar credentials, or state file directly.
   C (pin_unused)  - reserved, no handler
   D (pin_update)  - force an OTA update check/apply (bypasses apply_window)
 
+Every press is also echoed to the terminals of anyone currently logged in
+(SSH sessions and the local console), so you can watch which button someone
+pressed without tailing the journal. Set `buttons.echo_to_terminals: false`
+in config.yaml to keep presses in the journal only.
+
 For the view-toggle and refresh buttons, this drops privileges to the app
 directory's owner and re-runs the normal `inkycal.main` entrypoint, exactly
 like the periodic timer does, so the acting user, file ownership, and code
@@ -19,6 +24,7 @@ knows how to apply an update safely.
 """
 from __future__ import annotations
 
+import glob
 import os
 import pwd
 import subprocess
@@ -60,6 +66,67 @@ def _spawn_env(app_dir: str) -> dict:
     # rejects a None env value, so drop anything that isn't a real string.
     env.update({k: v for k, v in dotenv_values(dotenv_path).items() if v is not None})
     return env
+
+
+def _logged_in_terminals() -> list[str]:
+    """Terminal devices of everyone currently logged in.
+
+    Read from utmp via `who`, which covers SSH sessions (/dev/pts/N) and
+    anyone on the local console (/dev/ttyN). If `who` is missing or fails,
+    fall back to every open pseudo-terminal so a press still shows up.
+    """
+    devices: list[str] = []
+    try:
+        result = subprocess.run(["who"], capture_output=True, text=True, timeout=5, check=False)
+    except (OSError, subprocess.SubprocessError):
+        result = None
+
+    if result is not None and result.returncode == 0:
+        for line in result.stdout.splitlines():
+            fields = line.split()
+            if len(fields) < 2:
+                continue
+            device = "/dev/" + fields[1]
+            if device not in devices:
+                devices.append(device)
+
+    if not devices:
+        devices = sorted(p for p in glob.glob("/dev/pts/*") if os.path.basename(p).isdigit())
+    return devices
+
+
+def _write_to_terminal(device: str, text: str) -> None:
+    # O_NONBLOCK because gpiozero runs every handler on one background
+    # thread: a wedged or half-closed terminal must not stall the next
+    # press. O_NOCTTY so opening a console never makes it our controlling
+    # terminal. The daemon runs as root, so this works regardless of the
+    # tty's `mesg` setting (which is what makes `wall` unreliable here).
+    fd = os.open(device, os.O_WRONLY | os.O_NONBLOCK | os.O_NOCTTY)
+    try:
+        os.write(fd, text.encode("utf-8", "replace"))
+    finally:
+        os.close(fd)
+
+
+def _broadcast(message: str) -> None:
+    # \r\n rather than \n: a terminal in raw mode (an editor, a pager) does
+    # not translate a bare newline into a carriage return, which would leave
+    # the message stair-stepping across the screen.
+    text = f"\r\n[InkyCal] {message}\r\n"
+    for device in _logged_in_terminals():
+        try:
+            _write_to_terminal(device, text)
+        except OSError:
+            # Logged out between `who` and the write, or not a device we may
+            # write to. Nothing to do but skip it.
+            continue
+
+
+def _announce(message: str, *, echo: bool) -> None:
+    """Log to the journal, and echo to logged-in terminals when enabled."""
+    print(message, flush=True)
+    if echo:
+        _broadcast(message)
 
 
 def _run_main(app_dir: str, config_path: str, state_path: str, *, toggle_view: bool) -> None:
@@ -106,6 +173,7 @@ def main() -> None:
         return
 
     bounce_time = buttons_cfg.bounce_time_ms / 1000
+    echo = buttons_cfg.echo_to_terminals
 
     btn_view = Button(buttons_cfg.pin_view, pull_up=True, bounce_time=bounce_time)
     btn_refresh = Button(buttons_cfg.pin_refresh, pull_up=True, bounce_time=bounce_time)
@@ -113,28 +181,28 @@ def main() -> None:
     btn_update = Button(buttons_cfg.pin_update, pull_up=True, bounce_time=bounce_time)
 
     def on_view_pressed() -> None:
-        print("Button A (view) pressed: toggling daily/weekly view")
+        _announce("Button A (view) pressed: toggling daily/weekly view", echo=echo)
         try:
             _run_main(app_dir, config_path, state_path, toggle_view=True)
         except Exception as e:
-            print(f"View toggle failed: {e}")
+            _announce(f"View toggle failed: {e}", echo=echo)
 
     def on_refresh_pressed() -> None:
-        print("Button B (refresh) pressed: forcing a display refresh")
+        _announce("Button B (refresh) pressed: forcing a display refresh", echo=echo)
         try:
             _run_main(app_dir, config_path, state_path, toggle_view=False)
         except Exception as e:
-            print(f"Forced refresh failed: {e}")
+            _announce(f"Forced refresh failed: {e}", echo=echo)
 
     def on_unused_pressed() -> None:
-        print("Button C pressed: unused")
+        _announce("Button C pressed: no function assigned", echo=echo)
 
     def on_update_pressed() -> None:
-        print("Button D (update) pressed: forcing an update check/apply")
+        _announce("Button D (update) pressed: forcing an update check/apply", echo=echo)
         try:
             _trigger_force_update(state_path)
         except Exception as e:
-            print(f"Forced update trigger failed: {e}")
+            _announce(f"Forced update trigger failed: {e}", echo=echo)
 
     btn_view.when_pressed = on_view_pressed
     btn_refresh.when_pressed = on_refresh_pressed
@@ -146,7 +214,8 @@ def main() -> None:
         f"A=GPIO{buttons_cfg.pin_view} (view) "
         f"B=GPIO{buttons_cfg.pin_refresh} (refresh) "
         f"C=GPIO{buttons_cfg.pin_unused} (unused) "
-        f"D=GPIO{buttons_cfg.pin_update} (update)"
+        f"D=GPIO{buttons_cfg.pin_update} (update); "
+        f"echo to logged-in terminals {'on' if echo else 'off'}"
     )
     pause()
 
