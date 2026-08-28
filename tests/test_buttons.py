@@ -147,6 +147,38 @@ def test_show_feedback_never_blocks_the_work_it_announces(tmp_path, monkeypatch,
     assert "timed out" in capsys.readouterr().out
 
 
+def test_run_guarded_acts_on_a_press_when_nothing_is_in_flight():
+    ran = []
+
+    assert buttons._run_guarded("Button B (refresh)", lambda: ran.append("work"), echo=False) is True
+    assert ran == ["work"]
+
+
+def test_run_guarded_drops_a_press_arriving_while_the_previous_one_is_still_working(capsys):
+    ran = []
+
+    # A press landing mid-refresh means the panel hasn't visibly answered the
+    # first one yet -- not that a second refresh is wanted behind it.
+    with buttons._WORK_LOCK:
+        assert buttons._run_guarded("Button B (refresh)", lambda: ran.append("work"), echo=False) is False
+
+    assert ran == []
+    assert "already working on the previous press" in capsys.readouterr().out
+
+
+def test_run_guarded_releases_the_lock_when_the_work_fails(capsys):
+    def boom():
+        raise RuntimeError("display busy")
+
+    assert buttons._run_guarded("Button A (view)", boom, echo=False) is True
+    assert "Button A (view) failed: display busy" in capsys.readouterr().out
+
+    # A failed press must not wedge every press after it.
+    ran = []
+    assert buttons._run_guarded("Button A (view)", lambda: ran.append("work"), echo=False) is True
+    assert ran == ["work"]
+
+
 def test_logged_in_terminals_parses_who_output(monkeypatch):
     who_output = (
         "pi       pts/0        2026-08-28 09:14 (192.168.1.20)\n"

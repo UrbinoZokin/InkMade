@@ -14,7 +14,8 @@ Because the display cannot say anything until the fetch behind a press has
 finished -- 10-60 s of a completely still panel -- every press that does work
 first paints a short "working on it" notice via inkycal.feedback, so you can
 see the press landed. See `buttons.press_feedback` in config.yaml to change
-its style or turn it off.
+its style or turn it off. Presses arriving while that work is still running
+are dropped rather than queued, so impatient repeat presses cost nothing.
 
 Every press is also echoed to the terminals of anyone currently logged in
 (SSH sessions and the local console), so you can watch which button someone
@@ -35,6 +36,7 @@ import glob
 import os
 import pwd
 import subprocess
+import threading
 
 from dotenv import dotenv_values
 
@@ -58,6 +60,13 @@ FEEDBACK_TIMEOUT_S = 180
 # legitimately run for several minutes. Past this we stop waiting to put the
 # display back and leave that to the periodic timer.
 UPDATE_TIMEOUT_S = 900
+
+# Held for as long as a press is being acted on. Someone who presses again
+# while the panel is mid-refresh is telling us the first press hasn't visibly
+# landed yet -- not asking for a second refresh behind it. Without this, those
+# presses queue and the display flashes through one full cycle per press, which
+# looks exactly like the malfunction they were worried about.
+_WORK_LOCK = threading.Lock()
 
 
 def _app_owner_ids(app_dir: str) -> tuple[int, int]:
@@ -232,6 +241,25 @@ def _trigger_force_update(state_path: str) -> bool:
     return True
 
 
+def _run_guarded(label: str, action, *, echo: bool) -> bool:
+    """Act on one press, ignoring it if the previous press is still being acted on.
+
+    Returns False when the press was ignored. Failures inside `action` are
+    announced rather than raised: gpiozero would otherwise swallow them into a
+    background thread, and the lock must be released either way.
+    """
+    if not _WORK_LOCK.acquire(blocking=False):
+        _announce(f"{label}: already working on the previous press; ignoring this one", echo=echo)
+        return False
+    try:
+        action()
+    except Exception as e:
+        _announce(f"{label} failed: {e}", echo=echo)
+    finally:
+        _WORK_LOCK.release()
+    return True
+
+
 def main() -> None:
     from gpiozero import Button
     from signal import pause
@@ -264,29 +292,33 @@ def main() -> None:
 
     def on_view_pressed() -> None:
         _announce("Button A (view) pressed: toggling daily/weekly view", echo=echo)
-        try:
-            acknowledge("Switching view...")
+
+        def work() -> None:
+            acknowledge("Switching view... please wait")
             _run_main(app_dir, config_path, state_path, toggle_view=True)
-        except Exception as e:
-            _announce(f"View toggle failed: {e}", echo=echo)
+
+        _run_guarded("Button A (view)", work, echo=echo)
 
     def on_refresh_pressed() -> None:
         _announce("Button B (refresh) pressed: forcing a display refresh", echo=echo)
-        try:
-            acknowledge("Refreshing...")
+
+        def work() -> None:
+            acknowledge("Refreshing... please wait")
             _run_main(app_dir, config_path, state_path, toggle_view=False)
-        except Exception as e:
-            _announce(f"Forced refresh failed: {e}", echo=echo)
+
+        _run_guarded("Button B (refresh)", work, echo=echo)
 
     def on_unused_pressed() -> None:
         # No work follows, so nothing to acknowledge on the panel: a notice
-        # here would spend a full refresh saying "nothing happened".
+        # here would spend a full refresh saying "nothing happened". No guard
+        # either -- there is nothing in flight to protect.
         _announce("Button C pressed: no function assigned", echo=echo)
 
     def on_update_pressed() -> None:
         _announce("Button D (update) pressed: forcing an update check/apply", echo=echo)
-        try:
-            acknowledge("Checking for updates...")
+
+        def work() -> None:
+            acknowledge("Checking for updates... please wait")
             finished = _trigger_force_update(state_path)
             # The update itself changes nothing on screen unless it applied one
             # (ota_update.sh renders after that). Either way, re-render so the
@@ -294,8 +326,8 @@ def main() -> None:
             # update is still pending.
             if finished:
                 _run_main(app_dir, config_path, state_path, toggle_view=False)
-        except Exception as e:
-            _announce(f"Forced update trigger failed: {e}", echo=echo)
+
+        _run_guarded("Button D (update)", work, echo=echo)
 
     btn_view.when_pressed = on_view_pressed
     btn_refresh.when_pressed = on_refresh_pressed

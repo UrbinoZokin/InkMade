@@ -53,10 +53,19 @@ scheduled window.
 A press can't draw anything until it has fetched calendars, weather and
 travel times — 10–60 seconds during which the panel sits completely still.
 So before that work starts, the display puts up a short notice: *Switching
-view…*, *Refreshing…* or *Checking for updates…*. The panel begins its
-visible flash a few seconds after the press, which is the acknowledgement;
-the real content lands when the fetch finishes, and for button D when the
-update run finishes (so the notice stays up for the whole install).
+view… please wait*, *Refreshing… please wait* or *Checking for updates…
+please wait*. The panel begins its visible flash a few seconds after the
+press, which is the acknowledgement; the real content lands when the fetch
+finishes, and for button D when the update run finishes (so the notice stays
+up for the whole install).
+
+A press that arrives while the previous one is still being acted on is
+dropped, not queued — somebody pressing again because they aren't sure the
+first press worked wants that press to have worked, not a second refresh
+behind it. Without that, four impatient presses would mean four full flash
+cycles back to back, which looks exactly like the malfunction they were
+worried about. The extra presses show up in the journal (and in any SSH
+session) as ignored.
 
 The Impression has no partial refresh, so this costs one extra full-panel
 repaint — content arrives roughly twice as slowly as before. Pick the trade
