@@ -2,6 +2,10 @@
 Description=InkyCal - Run at boot and every quarter hour
 
 [Timer]
+# inkycal-boot.service is what guarantees a repaint at power-on; this run is
+# the backstop for a boot where that unit failed or was never enabled. It goes
+# through the usual no-change check, so on a normal boot it costs a fetch and
+# repaints nothing.
 OnBootSec=2min
 OnCalendar=*:0/15
 Persistent=true

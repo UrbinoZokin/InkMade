@@ -25,6 +25,7 @@ PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather
 - Physical buttons: switch daily/weekly view, force refresh, force update  
 - Presses are acknowledged on the display before the slow work starts  
 - Button presses echo live to any SSH session (and the local console)  
+- Everything starts on its own at power-on, with a forced display refresh  
 - Fully automated install with virtualenv (no externally-managed errors)  
 - systemd timers for reliability  
 
@@ -133,6 +134,55 @@ cd /opt/inkycal && \
   git reset --hard origin/main && \
   chmod +x /opt/inkycal/scripts/update.sh
 ```
+
+## 🔌 What happens when you plug it in
+
+Installing once is the last hands-on step. From then on, every power-on brings
+the whole thing up with no keyboard, SSH or button press:
+
+| Unit | What it does at boot |
+|---|---|
+| `inkycal-boot.service` | Forces one full display refresh |
+| `inkycal.timer` | Renders again 2 min in, then every quarter hour |
+| `inkycal-update.timer` | Checks GitHub for over-the-air updates, then every 30 min |
+| `inkycal-deepclean.timer` | Arms the weekly ghosting deep clean |
+| `inkycal-buttons.service` | Makes the physical buttons live |
+| `inkycal-provisioning.service` | BLE/mDNS setup agent, if you installed it |
+
+**Why the forced refresh.** E-ink holds its last image with the power off, and
+the quarter-hour render deliberately *skips* the panel when the schedule hasn't
+changed — that's what keeps a display this size from ghosting. Together those
+two mean a Pi that has been unplugged can come back up and sit there showing a
+stale day indefinitely, because as far as it can tell nothing needs repainting.
+`inkycal-boot.service` repaints unconditionally, so what you see after a power
+cut is always current.
+
+Before rendering it waits — briefly, and never fatally — for the two things the
+render is wrong without: a network to fetch calendars over, and a clock that NTP
+has corrected (the Pi has no battery-backed RTC, so a render that beats the time
+sync would date the screen from whenever it was last shut down). If either wait
+runs out it renders anyway; an offline render shows the WiFi-offline marker in
+the status bar, which is the feedback a not-yet-provisioned device should give.
+
+The same unit is a convenient "repaint now, whatever is on screen":
+
+```bash
+# Force a refresh by hand, exactly the way a power-on does it
+sudo systemctl start inkycal-boot.service
+
+# See what it did
+journalctl -u inkycal-boot.service -n 50
+
+# What is armed to start at boot
+systemctl list-unit-files 'inkycal*'
+systemctl list-timers --all | grep inkycal
+```
+
+Turn the power-on refresh off with `sudo systemctl disable inkycal-boot.service`;
+the quarter-hour timer still runs.
+
+> **Existing installs** pick this up automatically on the next over-the-air
+> update — the updater enables the new unit itself. There's nothing to re-run.
 
 ## 🔄 Over-the-air updates (no SSH)
 

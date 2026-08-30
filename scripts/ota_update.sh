@@ -208,13 +208,19 @@ fi
 if printf '%s\n' "$CHANGED" | grep -q '^systemd/'; then
   log "systemd units changed; reinstalling..."
   cp "$APP_DIR/systemd/"*.service "$APP_DIR/systemd/"*.timer /etc/systemd/system/
-  # Match install.sh: run the display services as the repo owner, not root.
-  sed -i "s/^User=.*/User=$OWNER/" \
+  # Match install.sh: run the display services as the repo owner, not root, and
+  # rewrite Group= alongside User= -- a unit left on the packaged Group=pi will
+  # not start on a device whose user was named anything else at first boot.
+  sed -i -e "s/^User=.*/User=$OWNER/" -e "s/^Group=.*/Group=$GROUP/" \
     /etc/systemd/system/inkycal.service \
+    /etc/systemd/system/inkycal-boot.service \
     /etc/systemd/system/inkycal-deepclean.service 2>/dev/null || true
   systemctl daemon-reload
+  # inkycal-boot.service is in this list so a device that gets the power-on
+  # refresh over the air, rather than from a fresh install.sh run, still has it
+  # armed for its next boot. No --now: this run triggers its own render below.
   systemctl enable inkycal.timer inkycal-deepclean.timer inkycal-update.timer \
-    >/dev/null 2>&1 || true
+    inkycal-boot.service >/dev/null 2>&1 || true
   # --now here (unlike the timers above): a device that gets this feature via
   # OTA rather than a fresh install.sh run has never had this unit running,
   # so plain `enable` would only symlink it for next boot.
