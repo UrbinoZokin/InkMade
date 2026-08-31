@@ -55,7 +55,14 @@ def _acquire(handle: TextIO, timeout: float) -> bool:
             return True
         except OSError as e:
             if e.errno not in (errno.EACCES, errno.EAGAIN):
-                raise
+                # Anything other than "someone else holds it" means this
+                # filesystem cannot answer the question -- flock is
+                # unsupported (ENOLCK, EOPNOTSUPP on some network and overlay
+                # mounts) or the descriptor is unusable. Serializing panel
+                # writes is best effort; the refresh is not, so treat it the
+                # same as a lock file we could not open at all.
+                print(f"Display lock unusable ({e}); rendering unlocked")
+                return False
         if time.monotonic() >= deadline:
             print(f"Display still busy after {timeout:.0f}s; refreshing without the lock")
             return False

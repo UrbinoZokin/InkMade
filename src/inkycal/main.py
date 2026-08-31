@@ -37,6 +37,13 @@ def _parse_hhmm(s: str) -> time:
 
 def _is_in_sleep_window(now: datetime, start: time, end: time) -> bool:
     # Handles overnight windows (e.g., 22:30 -> 06:30)
+    if start == end:
+        # An empty window is no window at all. Without this the overnight
+        # branch below reads "at or after start, or before end" as always
+        # true, so a config written to mean "never sleep" (start and end both
+        # 00:00, say) would instead skip every refresh, around the clock,
+        # leaving the panel frozen on whatever it last painted.
+        return False
     t = now.timetz().replace(tzinfo=None)
     if start < end:
         return start <= t < end

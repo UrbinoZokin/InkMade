@@ -1,4 +1,5 @@
 """The panel lock that keeps two refreshes off the SPI bus at once."""
+import errno
 import fcntl
 import sys
 import types
@@ -150,3 +151,25 @@ def test_show_on_inky_converts_and_rotates_before_taking_the_lock(fake_inky):
     assert fake_inky.image.mode == "P"
     assert fake_inky.image.size == (4, 8)
     assert fake_inky.border == "black"
+
+
+def test_renders_unlocked_when_flock_is_unsupported(lock_path, monkeypatch):
+    """Not every filesystem can answer a lock request (ENOLCK/EOPNOTSUPP on
+    some network and overlay mounts). Serializing panel writes is best effort;
+    the refresh is not, so an unexpected errno must degrade the same way an
+    unopenable lock file does rather than raising through show_on_inky."""
+    import types as _types
+
+    def _boom(fd, op):
+        raise OSError(errno.ENOLCK, "No locks available")
+
+    stub = _types.SimpleNamespace(
+        flock=_boom,
+        LOCK_EX=fcntl.LOCK_EX,
+        LOCK_NB=fcntl.LOCK_NB,
+        LOCK_UN=fcntl.LOCK_UN,
+    )
+    monkeypatch.setattr(display_inky, "fcntl", stub)
+
+    with display_lock(lock_path, timeout=1) as acquired:
+        assert acquired is False
