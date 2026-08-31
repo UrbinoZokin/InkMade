@@ -1,0 +1,26 @@
+[Unit]
+Description=InkyCal - Force a full display refresh at power-on
+Documentation=https://github.com/UrbinoZokin/InkMade
+# The panel keeps its last image through a power cut and the quarter-hour
+# render skips repainting when nothing changed, so a device that comes back up
+# needs one unconditional repaint to be trusted. Ordering here is a hint only:
+# time-sync.target is reached trivially unless systemd-time-wait-sync is
+# enabled, so boot_refresh.sh does its own bounded waiting for both the
+# network and the clock.
+Wants=network-online.target
+After=network-online.target time-sync.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/inkycal/scripts/boot_refresh.sh
+User=pi
+Group=pi
+# Room for both bounded waits (network, then clock) plus a full repaint of the
+# 13.3" panel, which takes the better part of a minute. Better a slow refresh
+# than one killed half-drawn.
+TimeoutStartSec=900
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

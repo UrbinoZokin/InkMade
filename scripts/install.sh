@@ -91,7 +91,7 @@ echo "-- Installing systemd unit files..."
 sudo cp "$APP_DIR/systemd/"*.service "$APP_DIR/systemd/"*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 
-sudo chmod +x /opt/inkycal/scripts/update.sh /opt/inkycal/scripts/ota_update.sh
+sudo chmod +x "$APP_DIR"/scripts/*.sh
 
 # Sanity checks
 echo
@@ -181,12 +181,32 @@ if [ "$NEED_REBOOT" -eq 1 ]; then
 fi
 
 
-# Update User/Group in the installed unit files
-sudo sed -i "s/^User=.*/User=$USER/" /etc/systemd/system/inkycal.service /etc/systemd/system/inkycal-deepclean.service
-# sudo sed -i "s/^Group=.*/Group=$GROUP/" /etc/systemd/system/inkycal.service /etc/systemd/system/inkycal-deepclean.service || False
+# Point the display units at whoever is installing, not the packaged 'pi'.
+# Group matters as much as User: since Bookworm the first-boot wizard lets you
+# pick any username, and a unit left on Group=pi refuses to start on a device
+# where no 'pi' group exists.
+APP_USER="$USER"
+APP_GROUP="$(id -gn)"
+echo "-- Running the display units as $APP_USER:$APP_GROUP ..."
+sudo sed -i -e "s/^User=.*/User=$APP_USER/" -e "s/^Group=.*/Group=$APP_GROUP/" \
+  /etc/systemd/system/inkycal.service \
+  /etc/systemd/system/inkycal-boot.service \
+  /etc/systemd/system/inkycal-deepclean.service
+sudo systemctl daemon-reload
 
-# ----- Enable timers -----
-echo "-- Enabling timers..."
+# ----- Enable services and timers -----
+# After this the device is hands-off: plug it in and everything below comes up
+# on its own, no keyboard, SSH or button press needed.
+echo "-- Enabling services and timers..."
+
+# network-online.target only means anything if something actually waits on the
+# network. Without this it is reached immediately and the power-on render can
+# start before WiFi has associated.
+sudo systemctl enable NetworkManager-wait-online.service >/dev/null 2>&1 || true
+# The Pi has no battery-backed RTC. Without NTP the first render after a power
+# cut dates the screen from whenever the device was last shut down.
+sudo systemctl enable systemd-timesyncd.service >/dev/null 2>&1 || true
+
 sudo systemctl enable --now inkycal.timer
 sudo systemctl enable --now inkycal-deepclean.timer
 # Over-the-air updates: periodically pull the latest code from GitHub so the
@@ -198,6 +218,23 @@ sudo systemctl enable --now inkycal-update.timer
 # / force update). Disable with: buttons.enabled: false in config.yaml
 # (or: sudo systemctl disable --now inkycal-buttons.service)
 sudo systemctl enable --now inkycal-buttons.service
+
+# Forced full repaint on every power-on. E-ink holds its last image through a
+# power cut and the quarter-hour render skips repainting when nothing changed,
+# so without this a device that has been unplugged can come back up showing a
+# stale screen. Enabled (not --now): the install triggers its own refresh at
+# the end. Disable with: sudo systemctl disable inkycal-boot.service
+sudo systemctl enable inkycal-boot.service
+
+# The provisioning agent is installed separately (scripts/install_provisioning.sh),
+# but if it is present it belongs in the set that starts at boot too.
+if [ -f /etc/systemd/system/inkycal-provisioning.service ]; then
+  echo "-- Provisioning agent present; making sure it starts at boot too..."
+  sudo systemctl enable --now inkycal-provisioning.service || true
+fi
+
+echo "-- Enabled units:"
+systemctl list-unit-files 'inkycal*' --no-pager || true
 
 # Quick inky detection (non-fatal)
 # echo "-- Checking Inky detection (non-fatal)..."
@@ -279,16 +316,35 @@ EOF
   echo "Reboot with: sudo reboot"
 fi
 
+# Paint the panel now, using the same unit every power-on will use. --no-block
+# so a slow full repaint doesn't hold the installer open; watch the journal for
+# how it went.
+echo
+echo "-- Forcing a display refresh (exactly what every power-on now does)..."
+sudo systemctl start --no-block inkycal-boot.service || true
+
 echo
 echo "== Done =="
 echo "Edit these before expecting calendar sync:"
 echo "  sudo nano $APP_DIR/config.yaml"
 echo "  sudo nano $APP_DIR/.env"
 echo
-echo "Check timers:"
+echo "At every power-on the Pi now brings itself up on its own:"
+echo "  inkycal-boot.service    forces a full display refresh"
+echo "  inkycal.timer           renders again every quarter hour"
+echo "  inkycal-update.timer    checks GitHub for over-the-air updates"
+echo "  inkycal-deepclean.timer weekly deep-clean refresh"
+echo "  inkycal-buttons.service physical buttons"
+echo
+echo "Check services and timers:"
+echo "  systemctl list-unit-files 'inkycal*'"
 echo "  systemctl list-timers --all | grep inkycal"
 echo "Logs:"
+echo "  journalctl -u inkycal-boot.service -n 50"
 echo "  journalctl -u inkycal.service -n 50"
+echo
+echo "Refresh the display on demand (same path as a power-on):"
+echo "  sudo systemctl start inkycal-boot.service"
 echo
 echo "Manual test (forces refresh):"
 echo "  $VENV_DIR/bin/python -m inkycal.main --config $APP_DIR/config.yaml --state $STATE_DIR/state.json --force"
