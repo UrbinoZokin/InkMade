@@ -184,6 +184,45 @@ the quarter-hour timer still runs.
 > **Existing installs** pick this up automatically on the next over-the-air
 > update — the updater enables the new unit itself. There's nothing to re-run.
 
+### When the display stops updating
+
+E-ink keeps its last image, so "frozen" and "crashed" look identical on the
+wall. Work from the journal rather than the panel:
+
+```bash
+# Did the quarter-hour render run, and what did it decide?
+journalctl -u inkycal.service -n 100
+
+# Same for the power-on repaint and the updater
+journalctl -u inkycal-boot.service -n 50
+journalctl -u inkycal-update.service -n 50
+
+# Is the timer still armed and firing?
+systemctl list-timers --all | grep inkycal
+```
+
+Every run prints its verdict, and each one points somewhere different:
+
+| Log line | What it means |
+|---|---|
+| `No schedule change; skipping display refresh` | Working as designed — nothing changed, and the panel is repainted at least hourly regardless. |
+| `In sleep window; skipping poll/refresh` | Check `sleep.start`/`sleep.end` in `config.yaml`. Collapsing the window to a single time does *not* disable sleep; set `sleep.enabled: false` for that. |
+| `... starting from a blank state` | `/var/lib/inkycal/state.json` was damaged (an SD-card write cut short by a power loss). It repairs itself on this run; the only cost is one extra repaint. |
+| `Display still busy` / `rendering unlocked` | Two refreshes wanted the panel at once. Harmless — the render goes ahead either way. |
+| A Python traceback | The run died before reaching the panel, and will keep dying until the cause is fixed. The last line names it. |
+
+Nothing in the journal at all means the render never ran — check the timer above,
+then `systemctl status inkycal.service`.
+
+To rule the schedule logic out entirely, force a repaint by hand:
+
+```bash
+sudo systemctl start inkycal-boot.service
+```
+
+If that paints and the quarter-hour runs don't, the problem is the timer or the
+skip logic, not the calendars or the panel.
+
 ## 🔄 Over-the-air updates (no SSH)
 
 Once installed, the Pi keeps itself up to date. You can hand the device to
