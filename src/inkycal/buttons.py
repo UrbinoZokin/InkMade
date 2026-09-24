@@ -43,7 +43,7 @@ import os
 import pwd
 import subprocess
 import threading
-from typing import Callable
+from typing import Callable, Optional
 
 from dotenv import dotenv_values
 
@@ -60,8 +60,8 @@ from .viewswap import NO_FRESH_FRAME
 FORCE_UPDATE_FLAG_NAME = "force_update"
 
 # A press-acknowledgement is one full-panel refresh; on the 13.3" Impression
-# that is well under a minute. Cap it so a wedged SPI transfer can't hold the
-# handler thread (and therefore the actual work) forever.
+# that is well under a minute. Cap it so a wedged SPI transfer can't hold up
+# the press (and therefore the actual work) forever.
 FEEDBACK_TIMEOUT_S = 180
 
 # The OTA service pulls, reinstalls dependencies and restarts units, so it can
@@ -306,23 +306,44 @@ def _trigger_force_update(state_path: str) -> bool:
     return True
 
 
-def _run_guarded(label: str, action, *, echo: bool) -> bool:
-    """Act on one press, ignoring it if the previous press is still being acted on.
+def _run_guarded(label: str, action, *, echo: bool) -> Optional[threading.Thread]:
+    """Start acting on one press, unless the previous press is still being acted on.
 
-    Returns False when the press was ignored. Failures inside `action` are
-    announced rather than raised: gpiozero would otherwise swallow them into a
-    background thread, and the lock must be released either way.
+    Returns the thread doing the work, or None when the press was ignored.
+
+    The work gets a thread of its own so that this returns straight away, and
+    that is what lets a repeat press be ignored at all. gpiozero hands every
+    press, on every button, to its handler from one thread (lgpio's
+    notification thread), and only hands over the next once that handler has
+    returned. Doing the work inside the handler held each repeat press back
+    until the work was done -- by which time the lock was free again, so the
+    press ran after all, queued behind the first.
+
+    Failures inside `action` are announced rather than raised, and the lock is
+    released either way.
     """
     if not _WORK_LOCK.acquire(blocking=False):
         _announce(f"{label}: already working on the previous press; ignoring this one", echo=echo)
-        return False
+        return None
+
+    def run() -> None:
+        try:
+            action()
+        except Exception as e:
+            _announce(f"{label} failed: {e}", echo=echo)
+        finally:
+            _WORK_LOCK.release()
+
+    worker = threading.Thread(target=run, name=label, daemon=True)
     try:
-        action()
-    except Exception as e:
-        _announce(f"{label} failed: {e}", echo=echo)
-    finally:
+        worker.start()
+    except RuntimeError as e:
+        # No thread, no work -- and nothing left to release the lock, which
+        # would then turn away every press until the daemon restarted.
         _WORK_LOCK.release()
-    return True
+        _announce(f"{label} failed: {e}", echo=echo)
+        return None
+    return worker
 
 
 def main() -> None:
