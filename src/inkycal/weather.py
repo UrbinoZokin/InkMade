@@ -47,11 +47,30 @@ class WeatherForecastResolver:
         self.timezone = timezone
         self.latitude = latitude
         self.longitude = longitude
+        # Filled in by the first lookup; see _hourly_forecast.
+        self._by_hour: Optional[Dict[str, tuple[float, int]]] = None
+        self._fetch_error: Optional[Exception] = None
 
-    def forecast_for_datetime(self, forecast_time: datetime) -> Optional[WeatherAtTime]:
-        if forecast_time.tzinfo is None:
-            return None
+    def _hourly_forecast(self) -> Dict[str, tuple[float, int]]:
+        """The hourly forecast keyed by local hour ("YYYY-MM-DDTHH:00").
 
+        Fetched once per resolver. Every event on the screen looks its weather
+        up in the same three-day forecast, and asking Open-Meteo again for each
+        one used to cost a request per event (two for events over an hour).
+        A failed fetch is remembered as well: otherwise an unreachable API would
+        make every event wait out its own timeout, one after another.
+        """
+        if self._fetch_error is not None:
+            raise self._fetch_error
+        if self._by_hour is None:
+            try:
+                self._by_hour = self._fetch_hourly_forecast()
+            except Exception as e:
+                self._fetch_error = e
+                raise
+        return self._by_hour
+
+    def _fetch_hourly_forecast(self) -> Dict[str, tuple[float, int]]:
         params = urlencode(
             {
                 "latitude": self.latitude,
@@ -73,14 +92,19 @@ class WeatherForecastResolver:
         codes = hourly.get("weather_code", [])
 
         if not times or len(times) != len(temps) or len(times) != len(codes):
-            return None
+            return {}
 
         by_hour: Dict[str, tuple[float, int]] = {}
         for t, temp, code in zip(times, temps, codes):
             by_hour[t] = (float(temp), int(code))
+        return by_hour
+
+    def forecast_for_datetime(self, forecast_time: datetime) -> Optional[WeatherAtTime]:
+        if forecast_time.tzinfo is None:
+            return None
 
         hour_key = forecast_time.strftime("%Y-%m-%dT%H:00")
-        values = by_hour.get(hour_key)
+        values = self._hourly_forecast().get(hour_key)
         if values is None:
             return None
 

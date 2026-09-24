@@ -5,29 +5,27 @@ import json
 import os
 import re
 import unicodedata
+from dataclasses import dataclass
 from datetime import datetime, time, timedelta
-from typing import List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
+from PIL import Image
 
 from .calendar_common import clip_events_to_range
 from .calendar_google import CONTACTS_BIRTHDAY_CALENDAR_ID, fetch_google_events
 from .calendar_icloud import fetch_icloud_events
-from .config import load_config
+from .config import CONFIG_PATH_DEFAULT, load_config
 from .display_inky import show_on_inky
-from .feedback import save_last_frame
 from .models import Event, Reminder
 from .network import get_ups_status, get_wifi_status
 from .reminders_google import fetch_google_tasks
 from .render import render_daily_schedule, render_weekly_schedule
 from .weather import WeatherAlert, WeatherForecastResolver
-from .state import State, load_state, save_state
+from .state import STATE_PATH_DEFAULT, VIEW_MODES, State, load_state, save_state, toggle_view_mode
 from .travel import TravelTimeResolver
-from . import updates
-
-STATE_PATH_DEFAULT = "/var/lib/inkycal/state.json"
-CONFIG_PATH_DEFAULT = "/opt/inkycal/config.yaml"
+from . import frames, updates
 
 
 def _parse_hhmm(s: str) -> time:
@@ -61,10 +59,6 @@ def _week_range(now: datetime, tz: ZoneInfo, days: int = 7):
     local = now.astimezone(tz)
     day_start = local.replace(hour=0, minute=0, second=0, microsecond=0)
     return day_start, day_start + timedelta(days=days)
-
-
-def _toggle_view_mode(current: str) -> str:
-    return "weekly" if current != "weekly" else "daily"
 
 
 def _normalize_text(value: str | None) -> str:
@@ -177,11 +171,17 @@ def _merge_all_day_events(events: List[Event]) -> List[Event]:
     return [*merged, *sorted(timed_events, key=_event_sort_key)]
 
 
-def _apply_travel_times(events: List[Event], origin_address: str, back_to_back_window_minutes: int) -> List[Event]:
+def _apply_travel_times(
+    events: List[Event],
+    origin_address: str,
+    back_to_back_window_minutes: int,
+    resolver: Optional[TravelTimeResolver] = None,
+) -> List[Event]:
     if not origin_address:
         return events
 
-    resolver = TravelTimeResolver()
+    if resolver is None:
+        resolver = TravelTimeResolver()
     processed: List[Event] = []
     previous_timed_event: Event | None = None
     for event in events:
@@ -225,8 +225,11 @@ def _apply_weather_forecast(
     latitude: float,
     longitude: float,
     include_end_weather_for_long_events: bool = True,
+    resolver: Optional[WeatherForecastResolver] = None,
 ) -> List[Event]:
-    resolver = WeatherForecastResolver(timezone=timezone, latitude=latitude, longitude=longitude)
+    # Pass the run's resolver in so every lookup shares its one forecast download.
+    if resolver is None:
+        resolver = WeatherForecastResolver(timezone=timezone, latitude=latitude, longitude=longitude)
     processed: List[Event] = []
     for event in events:
         if event.all_day:
@@ -280,12 +283,10 @@ def _apply_weather_forecast(
         )
     return processed
 
-def _process_events(events: List[Event], travel_enabled: bool, origin_address: str, back_to_back_window_minutes: int) -> List[Event]:
-    processed = _dedupe_events(events)
-    processed = _merge_all_day_events(processed)
-    if travel_enabled:
-        processed = _apply_travel_times(processed, origin_address, back_to_back_window_minutes)
-    return processed
+def _process_events(events: List[Event]) -> List[Event]:
+    # Travel times and weather are added later, and only to a frame that is
+    # actually being drawn (see _render_view).
+    return _merge_all_day_events(_dedupe_events(events))
 
 
 def _google_calendar_ids(cfg) -> List[str]:
@@ -325,22 +326,40 @@ def _fetch_raw_events(cfg, range_start: datetime, range_end: datetime, tz: ZoneI
 
 
 def _fetch_events_for_range(cfg, range_start: datetime, range_end: datetime, tz: ZoneInfo) -> List[Event]:
-    events = _fetch_raw_events(cfg, range_start, range_end, tz)
-    return _process_events(
-        events,
-        travel_enabled=cfg.travel.enabled,
-        origin_address=cfg.travel.origin_address,
-        back_to_back_window_minutes=cfg.travel.back_to_back_window_minutes,
+    return _process_events(_fetch_raw_events(cfg, range_start, range_end, tz))
+
+
+@dataclass(frozen=True)
+class _ViewEvents:
+    """The events each view lists, all cut from one fetch."""
+
+    today: List[Event]
+    tomorrow: List[Event]
+    week: List[Event]
+
+
+def _split_for_views(raw_events: List[Event], now: datetime, tz: ZoneInfo) -> _ViewEvents:
+    day_start, day_end = _today_range(now, tz)
+    one_day = timedelta(days=1)
+    return _ViewEvents(
+        today=_process_events(clip_events_to_range(raw_events, day_start, day_end, tz)),
+        tomorrow=_process_events(
+            clip_events_to_range(raw_events, day_start + one_day, day_end + one_day, tz)
+        ),
+        # The weekly view only lists event names grouped by day, so it skips
+        # the all-day merge the daily view applies (merging would collapse
+        # all-day events from different days into a single row).
+        week=_dedupe_events(raw_events),
     )
 
 
-def _fetch_events_for_week(cfg, range_start: datetime, range_end: datetime, tz: ZoneInfo) -> List[Event]:
-    # Weekly view only shows event names grouped by day, so this skips the
-    # travel-time and all-day-merge processing that _fetch_events_for_range
-    # applies for the daily view (merging would collapse all-day events from
-    # different days into a single row).
-    events = _fetch_raw_events(cfg, range_start, range_end, tz)
-    return _dedupe_events(events)
+def _fetch_view_events(cfg, now: datetime, tz: ZoneInfo) -> _ViewEvents:
+    # Today and tomorrow are the first two of the weekly view's seven days, so
+    # one fetch of the week feeds both views. A backend takes the same round
+    # trips to answer for seven days as for one, and this replaces the separate
+    # today and tomorrow fetches the daily view used to make on its own.
+    week_start, week_end = _week_range(now, tz)
+    return _split_for_views(_fetch_raw_events(cfg, week_start, week_end, tz), now, tz)
 
 
 def _reminder_sort_key(r: Reminder):
@@ -418,7 +437,10 @@ def _events_signature(
     view_mode: str = "daily",
     week_events: Optional[List[Event]] = None,
 ) -> str:
-    # Only include fields that affect rendering.
+    # Only include fields that affect rendering. Weather and travel times are
+    # left out: they're looked up only when a frame is drawn, weather changes
+    # by the hour regardless (the hourly repaint picks it up), and a travel
+    # time follows from the locations, which are already in here.
     def _event_payload(e: Event) -> dict:
         return {
             "source": e.source,
@@ -427,7 +449,6 @@ def _events_signature(
             "end": e.end.astimezone(tz).isoformat(),
             "all_day": e.all_day,
             "location": e.location or "",
-            "travel_time_text": e.travel_time_text or "",
         }
 
     def _reminder_payload(r: Reminder) -> dict:
@@ -461,6 +482,156 @@ def _events_signature(
     return hashlib.sha256(b).hexdigest()
 
 
+@dataclass(frozen=True)
+class _Snapshot:
+    """Everything one run knows that either view is drawn from."""
+
+    now: datetime
+    events: _ViewEvents
+    reminders: List[Reminder]
+    weather_alerts: List[WeatherAlert]
+    header_date: str
+    show_banner: bool
+    wifi_status: str
+    ups_status: dict
+    update_pending: bool
+
+
+def _view_signature(view_mode: str, snap: _Snapshot, tz: ZoneInfo) -> str:
+    """The content hash of `view_mode` as `snap` would draw it (see _events_signature)."""
+    if view_mode == "weekly":
+        return _events_signature(
+            tz, [], [], snap.weather_alerts, snap.header_date, snap.show_banner,
+            snap.wifi_status, snap.ups_status,
+            update_pending=snap.update_pending,
+            view_mode="weekly",
+            week_events=snap.events.week,
+        )
+    return _events_signature(
+        tz, snap.events.today, snap.events.tomorrow, snap.weather_alerts, snap.header_date,
+        snap.show_banner, snap.wifi_status, snap.ups_status, snap.reminders,
+        update_pending=snap.update_pending,
+        view_mode="daily",
+    )
+
+
+def _render_view(
+    view_mode: str,
+    snap: _Snapshot,
+    cfg,
+    tz: ZoneInfo,
+    weather_resolver: WeatherForecastResolver,
+) -> Image.Image:
+    if view_mode == "weekly":
+        return render_weekly_schedule(
+            canvas_w=cfg.display.width,
+            canvas_h=cfg.display.height,
+            now=snap.now,
+            week_events=snap.events.week,
+            tz=tz,
+            show_sleep_banner=snap.show_banner,
+            sleep_banner_text=cfg.sleep.banner_text,
+            wifi_status=snap.wifi_status,
+            ups_status=snap.ups_status,
+            weather_alerts=snap.weather_alerts,
+            update_pending=snap.update_pending,
+        )
+
+    # Travel times and weather are looked up here, for a frame that's actually
+    # being drawn, rather than on every run: neither is part of the content
+    # hash, so a run that finds nothing changed never needs them.
+    today = snap.events.today
+    tomorrow = snap.events.tomorrow
+    if cfg.travel.enabled:
+        # One resolver for both days, so a place visited on each is looked up once.
+        travel_resolver = TravelTimeResolver()
+        origin = cfg.travel.origin_address
+        window = cfg.travel.back_to_back_window_minutes
+        today = _apply_travel_times(today, origin, window, resolver=travel_resolver)
+        tomorrow = _apply_travel_times(tomorrow, origin, window, resolver=travel_resolver)
+    today = _apply_weather_forecast(
+        today,
+        cfg.timezone,
+        cfg.weather.latitude,
+        cfg.weather.longitude,
+        resolver=weather_resolver,
+    )
+    tomorrow = _apply_weather_forecast(
+        tomorrow,
+        cfg.timezone,
+        cfg.weather.latitude,
+        cfg.weather.longitude,
+        include_end_weather_for_long_events=False,
+        resolver=weather_resolver,
+    )
+
+    return render_daily_schedule(
+        canvas_w=cfg.display.width,
+        canvas_h=cfg.display.height,
+        now=snap.now,
+        events=today,
+        tz=tz,
+        show_sleep_banner=snap.show_banner,
+        sleep_banner_text=cfg.sleep.banner_text,
+        wifi_status=snap.wifi_status,
+        ups_status=snap.ups_status,
+        tomorrow_events=tomorrow,
+        weather_alerts=snap.weather_alerts,
+        reminders=snap.reminders,
+        update_pending=snap.update_pending,
+    )
+
+
+def _keep_frames_current(
+    state_path: str,
+    view_mode: str,
+    signatures: Dict[str, str],
+    now: datetime,
+    canvas_size: Tuple[int, int],
+    render: Callable[[str], Image.Image],
+    painted: bool,
+) -> None:
+    """Leave each view a saved frame of what it would show now (see inkycal.frames).
+
+    The view that isn't on the panel is the point. It's redrawn whenever its
+    content has changed since it was saved, and once it's getting old, so the
+    view button can put it straight up instead of fetching and drawing it
+    first (inkycal.viewswap). That costs no fetch -- this run already has
+    everything it shows -- and it comes after the panel has been dealt with,
+    so it never holds the display up.
+
+    The view on the panel is saved as it's painted, so it only needs drawing
+    here when its saved frame is missing or doesn't match: a fresh install,
+    the first run after the update that introduced these files, or a save
+    that failed.
+
+    Nothing in here may fail the run: the panel is already right, and a view
+    without a saved frame just takes the slow way when the button is pressed.
+    """
+    for mode in VIEW_MODES:
+        on_panel = mode == view_mode
+        if on_panel and painted:
+            continue
+        info = frames.read_frame_info(state_path, mode)
+        if (
+            info is not None
+            and info.content_hash == signatures[mode]
+            and info.size == canvas_size
+            and (on_panel or frames.is_fresh(info, now, frames.REDRAW_AFTER))
+        ):
+            continue
+        try:
+            img = render(mode)
+        except Exception as e:
+            print(f"Could not draw the {mode} view ahead of time; the view button will fetch it instead. Error: {e}")
+            continue
+        if frames.save_frame(state_path, mode, img, signatures[mode], now):
+            if on_panel:
+                print(f"Saved a copy of the {mode} view on the panel")
+            else:
+                print(f"Drew the {mode} view ahead of time for the view button")
+
+
 def run_once(
     config_path: str = CONFIG_PATH_DEFAULT,
     state_path: str = STATE_PATH_DEFAULT,
@@ -476,12 +647,12 @@ def run_once(
     now = datetime.now(tz=tz)
 
     if toggle_view:
-        state.view_mode = _toggle_view_mode(state.view_mode)
+        state.view_mode = toggle_view_mode(state.view_mode)
         save_state(state_path, state)
         force = True
         print(f"View toggled to '{state.view_mode}'")
 
-    # load_state() and _toggle_view_mode() both already guarantee one of these two values.
+    # load_state() and toggle_view_mode() both already guarantee one of VIEW_MODES.
     view_mode = state.view_mode
 
     sleep_start = _parse_hhmm(cfg.sleep.start)
@@ -518,8 +689,8 @@ def run_once(
                 f"local={update_status.local} remote={update_status.remote}"
             )
 
-    # Fetch events (only needed if we're not just placing a banner)
-    day_start, day_end = _today_range(now, tz)
+    # One resolver for the whole run: the alerts, and a single forecast download
+    # shared by every event that gets weather drawn next to it.
     weather_resolver = WeatherForecastResolver(
         timezone=cfg.timezone,
         latitude=cfg.weather.latitude,
@@ -531,40 +702,34 @@ def run_once(
         print(f"NWS alert lookup failed; continuing without alerts. Error: {e}")
         weather_alerts = []
 
-    header_date = now.strftime("%A, %B %-d, %Y")
-    show_banner = in_sleep and cfg.sleep.enabled
-    wifi_status = get_wifi_status()
-    ups_status = get_ups_status()
-
-    events: List[Event] = []
-    tomorrow_events: List[Event] = []
-    reminders: List[Reminder] = []
-    week_events: List[Event] = []
-
-    if view_mode == "weekly":
-        week_start, week_end = _week_range(now, tz)
-        week_events = _fetch_events_for_week(cfg, week_start, week_end, tz)
-    else:
-        tomorrow_start = day_start + timedelta(days=1)
-        tomorrow_end = day_end + timedelta(days=1)
-        events = _fetch_events_for_range(cfg, day_start, day_end, tz)
-        tomorrow_events = _fetch_events_for_range(cfg, tomorrow_start, tomorrow_end, tz)
-        reminders = _fetch_reminders_for_day(cfg, day_end, tz)
-
-    # Render signature includes whether we show the sleep banner
-    sig = _events_signature(
-        tz, events, tomorrow_events, weather_alerts, header_date, show_banner,
-        wifi_status, ups_status, reminders,
+    # Everything both views show, fetched once. The view on the panel is
+    # checked against what's there; the other is kept drawn for the view
+    # button (see _keep_frames_current).
+    _, day_end = _today_range(now, tz)
+    snap = _Snapshot(
+        now=now,
+        events=_fetch_view_events(cfg, now, tz),
+        reminders=_fetch_reminders_for_day(cfg, day_end, tz),
+        weather_alerts=weather_alerts,
+        header_date=now.strftime("%A, %B %-d, %Y"),
+        show_banner=in_sleep and cfg.sleep.enabled,
+        wifi_status=get_wifi_status(),
+        ups_status=get_ups_status(),
         update_pending=update_pending,
-        view_mode=view_mode,
-        week_events=week_events,
     )
+    signatures = {mode: _view_signature(mode, snap, tz) for mode in VIEW_MODES}
+    sig = signatures[view_mode]
+
+    def render(mode: str) -> Image.Image:
+        return _render_view(mode, snap, cfg, tz, weather_resolver)
+
     should_force_hourly = _should_force_hourly_refresh(state, now, timedelta(hours=1))
     print(
-        f"view_mode={view_mode}; fetched {len(events) + len(week_events)} events total; "
-        f"in_sleep={in_sleep}, show_banner={show_banner}, "
+        f"view_mode={view_mode}; fetched {len(snap.events.week)} events for the week "
+        f"({len(snap.events.today)} today); in_sleep={in_sleep}, show_banner={snap.show_banner}, "
         f"force={force}, deep_clean={deep_clean}, hourly_refresh={should_force_hourly}"
     )
+    painted = False
     if (
         (not force)
         and (not deep_clean)
@@ -573,63 +738,29 @@ def run_once(
         and (sig == state.last_hash)
     ):
         print("No schedule change; skipping display refresh")
-        return
-
-    if view_mode == "weekly":
-        img = render_weekly_schedule(
-            canvas_w=cfg.display.width,
-            canvas_h=cfg.display.height,
-            now=now,
-            week_events=week_events,
-            tz=tz,
-            show_sleep_banner=show_banner,
-            sleep_banner_text=cfg.sleep.banner_text,
-            wifi_status=wifi_status,
-            ups_status=ups_status,
-            weather_alerts=weather_alerts,
-            update_pending=update_pending,
-        )
     else:
-        events_with_weather = _apply_weather_forecast(
-            events,
-            cfg.timezone,
-            cfg.weather.latitude,
-            cfg.weather.longitude,
-        )
-        tomorrow_events_with_weather = _apply_weather_forecast(
-            tomorrow_events,
-            cfg.timezone,
-            cfg.weather.latitude,
-            cfg.weather.longitude,
-            include_end_weather_for_long_events=False,
-        )
+        img = render(view_mode)
+        show_on_inky(img, rotate_degrees=cfg.display.rotate_degrees, border=cfg.display.border)
+        # Keep a copy of what's on the panel so a button press can redraw it with a
+        # "working on it" bar instead of blanking the screen (see inkycal.feedback).
+        frames.save_frame(state_path, view_mode, img, sig, now)
 
-        img = render_daily_schedule(
-            canvas_w=cfg.display.width,
-            canvas_h=cfg.display.height,
-            now=now,
-            events=events_with_weather,
-            tz=tz,
-            show_sleep_banner=show_banner,
-            sleep_banner_text=cfg.sleep.banner_text,
-            wifi_status=wifi_status,
-            ups_status=ups_status,
-            tomorrow_events=tomorrow_events_with_weather,
-            weather_alerts=weather_alerts,
-            reminders=reminders,
-            update_pending=update_pending,
-        )
+        state.last_hash = sig
+        state.last_rendered_iso = now.isoformat()
+        if should_apply_sleep_banner:
+            state.last_sleep_banner_date = today_str
+        save_state(state_path, state)
+        painted = True
 
-    show_on_inky(img, rotate_degrees=cfg.display.rotate_degrees, border=cfg.display.border)
-    # Keep a copy of what's on the panel so a button press can redraw it with a
-    # "working on it" bar instead of blanking the screen (see inkycal.feedback).
-    save_last_frame(state_path, img)
-
-    state.last_hash = sig
-    state.last_rendered_iso = now.isoformat()
-    if should_apply_sleep_banner:
-        state.last_sleep_banner_date = today_str
-    save_state(state_path, state)
+    _keep_frames_current(
+        state_path,
+        view_mode,
+        signatures,
+        now,
+        (cfg.display.width, cfg.display.height),
+        render,
+        painted=painted,
+    )
 
 
 def main():

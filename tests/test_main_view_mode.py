@@ -4,18 +4,18 @@ from zoneinfo import ZoneInfo
 
 from inkycal.main import (
     _events_signature,
-    _fetch_events_for_week,
-    _toggle_view_mode,
+    _fetch_view_events,
     _week_range,
 )
 from inkycal.models import Event
+from inkycal.state import toggle_view_mode
 
 
 def test_toggle_view_mode_flips_between_daily_and_weekly():
-    assert _toggle_view_mode("daily") == "weekly"
-    assert _toggle_view_mode("weekly") == "daily"
+    assert toggle_view_mode("daily") == "weekly"
+    assert toggle_view_mode("weekly") == "daily"
     # Any unrecognized value is treated as non-weekly, so it flips to weekly.
-    assert _toggle_view_mode("") == "weekly"
+    assert toggle_view_mode("") == "weekly"
 
 
 def test_week_range_spans_seven_days_from_local_midnight():
@@ -73,7 +73,7 @@ def test_events_signature_reflects_week_events_changes():
     assert empty_sig != with_event_sig
 
 
-def test_fetch_events_for_week_dedupes_but_does_not_merge_all_day_events(monkeypatch):
+def test_week_events_are_deduped_but_all_day_events_are_not_merged(monkeypatch):
     tz = ZoneInfo("America/Phoenix")
     cfg = SimpleNamespace(
         google=SimpleNamespace(enabled=True, calendar_ids=["primary"]),
@@ -107,12 +107,7 @@ def test_fetch_events_for_week_dedupes_but_does_not_merge_all_day_events(monkeyp
         lambda *_args, **_kwargs: [monday, friday, duplicate],
     )
 
-    events = _fetch_events_for_week(
-        cfg,
-        datetime(2026, 2, 2, 0, 0, tzinfo=tz),
-        datetime(2026, 2, 9, 0, 0, tzinfo=tz),
-        tz,
-    )
+    events = _fetch_view_events(cfg, datetime(2026, 2, 2, 8, 0, tzinfo=tz), tz).week
 
     # The Monday duplicate is deduped away, but distinct-day all-day events
     # stay separate (unlike the daily view's merge-into-one-row behavior).

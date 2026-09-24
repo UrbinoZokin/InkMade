@@ -1,6 +1,9 @@
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from types import SimpleNamespace
+
+import pytest
 
 from inkycal.main import _apply_weather_forecast, _events_signature, print_long_events_weather_report
 from inkycal.models import Event
@@ -222,3 +225,85 @@ def test_active_alerts_uses_headline_and_dedupes(monkeypatch):
     alerts = resolver.active_alerts(limit=3)
 
     assert [alert.headline for alert in alerts] == ["Flood Warning", "Moderate: Heat Advisory"]
+
+
+class _JsonResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return json.dumps(self._payload).encode("utf-8")
+
+
+def test_forecast_is_downloaded_once_for_every_lookup(monkeypatch):
+    # Every event on the screen reads the same three-day forecast; this used
+    # to be one request per event, and two for events over an hour.
+    tz = ZoneInfo("America/Phoenix")
+    hours = range(24)
+    payload = {
+        "hourly": {
+            "time": [f"2026-02-05T{h:02d}:00" for h in hours],
+            "temperature_2m": [60.0 + h for h in hours],
+            "weather_code": [0 for _ in hours],
+        }
+    }
+    requests = []
+    monkeypatch.setattr(
+        "inkycal.weather.urlopen", lambda url, **_kw: requests.append(url) or _JsonResponse(payload)
+    )
+    resolver = WeatherForecastResolver("America/Phoenix", 33.4, -112.3)
+
+    temps = [
+        resolver.forecast_for_datetime(datetime(2026, 2, 5, hour, 30, tzinfo=tz)).temperature_f
+        for hour in (9, 12, 17)
+    ]
+
+    assert temps == [69, 72, 77]
+    assert len(requests) == 1
+
+
+def test_an_unreachable_forecast_costs_one_attempt_not_one_per_event(monkeypatch):
+    # Each attempt can wait out a full timeout; one per event added up to
+    # well over a minute of a still panel when Open-Meteo was down.
+    tz = ZoneInfo("America/Phoenix")
+    attempts = []
+
+    def unreachable(url, **_kw):
+        attempts.append(url)
+        raise OSError("timed out")
+
+    monkeypatch.setattr("inkycal.weather.urlopen", unreachable)
+    resolver = WeatherForecastResolver("America/Phoenix", 33.4, -112.3)
+
+    for hour in (9, 12, 17):
+        with pytest.raises(OSError):
+            resolver.forecast_for_datetime(datetime(2026, 2, 5, hour, tzinfo=tz))
+
+    assert len(attempts) == 1
+
+
+def test_apply_weather_forecast_uses_the_resolver_it_is_given(monkeypatch):
+    tz = ZoneInfo("America/Phoenix")
+    event = Event(
+        source="google",
+        title="Drive to office",
+        start=datetime(2026, 2, 5, 9, 0, tzinfo=tz),
+        end=datetime(2026, 2, 5, 10, 0, tzinfo=tz),
+    )
+
+    def no_new_resolvers(**_kwargs):
+        raise AssertionError("should have used the resolver passed in")
+
+    monkeypatch.setattr("inkycal.main.WeatherForecastResolver", no_new_resolvers)
+
+    processed = _apply_weather_forecast(
+        [event], "America/Phoenix", 33.4, -112.3, resolver=StubWeatherResolver("America/Phoenix", 33.4, -112.3)
+    )
+
+    assert processed[0].weather_text == "72°F"

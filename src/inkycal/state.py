@@ -4,12 +4,22 @@ from pathlib import Path
 from typing import Any
 import json
 
+STATE_PATH_DEFAULT = "/var/lib/inkycal/state.json"
+
+VIEW_MODES = ("daily", "weekly")
+
+
+def toggle_view_mode(current: str) -> str:
+    """The view the view-toggle button switches to from `current`."""
+    return "weekly" if current != "weekly" else "daily"
+
+
 @dataclass
 class State:
     last_hash: str = ""
     last_rendered_iso: str = ""
     last_sleep_banner_date: str = ""  # YYYY-MM-DD when banner was last applied
-    view_mode: str = "daily"  # "daily" or "weekly"; set by the view-toggle button
+    view_mode: str = "daily"  # one of VIEW_MODES; set by the view-toggle button
 
 def load_state(path: str) -> State:
     """The saved state, or a blank one when it cannot be read.
@@ -52,7 +62,7 @@ def load_state(path: str) -> State:
         return State()
 
     view_mode = str(data.get("view_mode", "daily"))
-    if view_mode not in ("daily", "weekly"):
+    if view_mode not in VIEW_MODES:
         view_mode = "daily"
     return State(
         last_hash=str(data.get("last_hash", "")),

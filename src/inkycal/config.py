@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import yaml
 
+CONFIG_PATH_DEFAULT = "/opt/inkycal/config.yaml"
+
 @dataclass
 class SleepConfig:
     enabled: bool

@@ -1,7 +1,9 @@
 import os
 from types import SimpleNamespace
 
-from inkycal import buttons
+import pytest
+
+from inkycal import buttons, viewswap
 
 
 def test_app_owner_ids_matches_directory_stat(tmp_path):
@@ -75,6 +77,22 @@ def test_run_main_appends_toggle_view_flag(tmp_path, monkeypatch):
 
     (cmd,), _kwargs = calls[0]
     assert cmd[-2:] == ["--force", "--toggle-view"]
+
+
+def test_run_main_can_run_unforced(tmp_path, monkeypatch):
+    # The view button's check after a saved frame goes up: repaint only if
+    # something changed, exactly like a timer run.
+    calls = []
+    monkeypatch.setattr(
+        buttons.subprocess, "run", lambda *a, **kw: calls.append((a, kw)) or SimpleNamespace(returncode=0)
+    )
+    monkeypatch.setattr(buttons, "_spawn_env", lambda app_dir: {})
+    monkeypatch.setattr(buttons, "_app_owner_groups", lambda uid, gid: [gid])
+
+    buttons._run_main(str(tmp_path), "config.yaml", "state.json", toggle_view=False, force=False)
+
+    (cmd,), _kwargs = calls[0]
+    assert cmd[-4:] == ["--config", "config.yaml", "--state", "state.json"]
 
 
 def test_run_main_reports_nonzero_exit(tmp_path, monkeypatch, capsys):
@@ -257,3 +275,69 @@ def test_announce_stays_in_the_journal_when_echo_disabled(monkeypatch, capsys):
 
     assert "Button C pressed" in capsys.readouterr().out
     assert broadcast == []
+
+
+def _fake_viewswap(monkeypatch, outcome):
+    calls = []
+
+    def run(*a, **kw):
+        calls.append((a, kw))
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return SimpleNamespace(returncode=outcome)
+
+    monkeypatch.setattr(buttons.subprocess, "run", run)
+    monkeypatch.setattr(buttons, "_spawn_env", lambda app_dir: {})
+    monkeypatch.setattr(buttons, "_app_owner_groups", lambda uid, gid: [gid])
+    return calls
+
+
+def test_show_saved_view_runs_the_viewswap_entrypoint_as_the_app_user(tmp_path, monkeypatch):
+    calls = _fake_viewswap(monkeypatch, 0)
+
+    assert buttons._show_saved_view(str(tmp_path), "config.yaml", "state.json", echo=False) is True
+
+    (cmd,), kwargs = calls[0]
+    assert cmd[1:3] == ["-m", "inkycal.viewswap"]
+    assert cmd[3:] == ["--config", "config.yaml", "--state", "state.json"]
+    assert kwargs["timeout"] == buttons.FEEDBACK_TIMEOUT_S
+    assert kwargs["user"] == os.stat(tmp_path).st_uid
+
+
+@pytest.mark.parametrize("returncode", [viewswap.NO_FRESH_FRAME, 1])
+def test_show_saved_view_sends_the_press_down_the_slow_path_when_it_cannot_switch(tmp_path, monkeypatch, returncode):
+    _fake_viewswap(monkeypatch, returncode)
+
+    assert buttons._show_saved_view(str(tmp_path), "config.yaml", "state.json", echo=False) is False
+
+
+def test_show_saved_view_gives_up_on_a_panel_that_will_not_answer(tmp_path, monkeypatch, capsys):
+    _fake_viewswap(
+        monkeypatch, buttons.subprocess.TimeoutExpired(cmd="python", timeout=buttons.FEEDBACK_TIMEOUT_S)
+    )
+
+    assert buttons._show_saved_view(str(tmp_path), "config.yaml", "state.json", echo=False) is False
+    assert "timed out" in capsys.readouterr().out
+
+
+def _record_switch(monkeypatch, *, saved_view_shown: bool):
+    runs, acks = [], []
+    monkeypatch.setattr(buttons, "_show_saved_view", lambda *a, **kw: saved_view_shown)
+    monkeypatch.setattr(buttons, "_run_main", lambda *a, **kw: runs.append(kw))
+    buttons._switch_view("/opt/inkycal", "config.yaml", "state.json", acks.append, echo=False)
+    return runs, acks
+
+
+def test_switch_view_puts_the_saved_frame_up_then_checks_it_unforced(monkeypatch):
+    runs, acks = _record_switch(monkeypatch, saved_view_shown=True)
+
+    # No "please wait" notice: the new view itself is the acknowledgement.
+    assert acks == []
+    assert runs == [{"toggle_view": False, "force": False}]
+
+
+def test_switch_view_falls_back_to_a_notice_and_a_forced_toggle(monkeypatch):
+    runs, acks = _record_switch(monkeypatch, saved_view_shown=False)
+
+    assert acks == ["Switching view... please wait"]
+    assert runs == [{"toggle_view": True}]

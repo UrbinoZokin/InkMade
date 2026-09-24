@@ -1,9 +1,9 @@
-from types import SimpleNamespace
+from datetime import datetime, timezone
 
 import pytest
 from PIL import Image
 
-from inkycal import feedback
+from inkycal import feedback, frames
 from inkycal.state import State, load_state, save_state
 
 
@@ -28,16 +28,21 @@ def _frame(color=(200, 30, 30), size=(CANVAS_W, CANVAS_H)) -> Image.Image:
     return Image.new("RGB", size, color)
 
 
-def test_last_frame_is_cached_next_to_the_state_file(tmp_path):
+def _save_frame(state_path: str, img: Image.Image, view_mode: str = "daily") -> None:
+    assert frames.save_frame(state_path, view_mode, img, "content-hash", datetime.now(timezone.utc))
+
+
+def test_load_last_frame_returns_the_saved_frame_of_the_view_on_screen(tmp_path):
     state_path = str(tmp_path / "state.json")
+    save_state(state_path, State(view_mode="weekly"))
+    _save_frame(state_path, _frame((200, 30, 30)), "daily")
+    _save_frame(state_path, _frame((30, 30, 200)), "weekly")
 
-    feedback.save_last_frame(state_path, _frame())
-
-    assert feedback.last_frame_path(state_path) == str(tmp_path / feedback.LAST_FRAME_NAME)
     cached = feedback.load_last_frame(state_path, CANVAS_W, CANVAS_H)
+
     assert cached is not None
     assert cached.size == (CANVAS_W, CANVAS_H)
-    assert cached.getpixel((0, 0)) == (200, 30, 30)
+    assert cached.getpixel((0, 0)) == (30, 30, 200)
 
 
 def test_load_last_frame_returns_none_when_there_is_nothing_cached(tmp_path):
@@ -48,17 +53,9 @@ def test_load_last_frame_rejects_a_frame_from_a_different_canvas_size(tmp_path):
     # e.g. the display size changed in config.yaml since that frame was drawn;
     # pasting a banner onto it would leave the panel part stale, part blank.
     state_path = str(tmp_path / "state.json")
-    feedback.save_last_frame(state_path, _frame(size=(CANVAS_W // 2, CANVAS_H)))
+    _save_frame(state_path, _frame(size=(CANVAS_W // 2, CANVAS_H)))
 
     assert feedback.load_last_frame(state_path, CANVAS_W, CANVAS_H) is None
-
-
-def test_save_last_frame_leaves_no_temp_file_behind(tmp_path):
-    state_path = str(tmp_path / "state.json")
-
-    feedback.save_last_frame(state_path, _frame())
-
-    assert sorted(p.name for p in tmp_path.iterdir()) == [feedback.LAST_FRAME_NAME]
 
 
 def test_render_notice_over_a_base_frame_keeps_the_schedule_and_adds_a_bar(tmp_path):
@@ -98,7 +95,7 @@ def test_show_notice_draws_over_the_cached_frame(tmp_path, monkeypatch):
     shown = []
     monkeypatch.setattr(feedback, "show_on_inky", lambda img, **kw: shown.append((img, kw)))
     state_path = str(tmp_path / "state.json")
-    feedback.save_last_frame(state_path, _frame())
+    _save_frame(state_path, _frame())
 
     assert feedback.show_notice("Refreshing...", _config(tmp_path), state_path) is True
 
