@@ -7,7 +7,7 @@ quarter hour leaves it there for good.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -67,6 +67,15 @@ def panel(tmp_path, monkeypatch):
     return shown
 
 
+TZ = ZoneInfo("America/Phoenix")
+
+
+def _event_today(title: str, hour: int, day_offset: int = 0) -> Event:
+    midnight = datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = midnight + timedelta(days=day_offset, hours=hour)
+    return Event(source="google", title=title, start=start, end=start + timedelta(hours=1))
+
+
 def _config(tmp_path, *, sleep_enabled="false", sleep_start="22:30", sleep_end="06:30") -> str:
     path = tmp_path / "config.yaml"
     path.write_text(
@@ -97,22 +106,12 @@ def test_repaints_when_the_sleep_window_is_empty(tmp_path, panel, monkeypatch):
     config_path = _config(tmp_path, sleep_enabled="true", sleep_start="00:00", sleep_end="00:00")
     state_path = str(tmp_path / "state.json")
 
-    tz = ZoneInfo("America/Phoenix")
-    fetched: list[list[Event]] = [
-        [],
-        [Event(
-            source="google",
-            title="Dentist",
-            start=datetime(2026, 8, 31, 9, 0, tzinfo=tz),
-            end=datetime(2026, 8, 31, 10, 0, tzinfo=tz),
-        )],
-    ]
-    monkeypatch.setattr(
-        main, "_fetch_events_for_range", lambda *_a, **_kw: fetched.pop(0) if fetched else []
-    )
+    calendar: list[Event] = []
+    monkeypatch.setattr(main, "_fetch_raw_events", lambda *_a, **_kw: list(calendar))
 
     main.run_once(config_path=config_path, state_path=state_path)
     # A new event on the calendar: the display has to show it.
+    calendar.append(_event_today("Dentist", hour=9))
     main.run_once(config_path=config_path, state_path=state_path)
 
     assert len(panel) == 2

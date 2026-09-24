@@ -24,6 +24,8 @@ PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather
 - Over-the-air updates (pulls new code from GitHub on its own — no SSH)  
 - Physical buttons: switch daily/weekly view, force refresh, force update  
 - Presses are acknowledged on the display before the slow work starts  
+- Switching views is a single refresh: the other view is kept drawn ahead of time  
+- One calendar fetch and one forecast download per update, however many events  
 - Button presses echo live to any SSH session (and the local console)  
 - Everything starts on its own at power-on, with a forced display refresh  
 - Fully automated install with virtualenv (no externally-managed errors)  
@@ -43,11 +45,33 @@ wired up as follows:
 | C | Unused (reserved for future use) |
 | D | Force an OTA update check, applying it right away if one is pending (bypasses the overnight `apply_window`) |
 
-Pressing A or B re-renders instantly using the same code path as the
-periodic timer, so credentials and file ownership stay consistent. Pressing
-D asks `inkycal-update.service` to check GitHub and, if the checkout is
-behind, apply the update immediately instead of waiting for the next
-scheduled window.
+Pressing B re-renders instantly using the same code path as the periodic
+timer, so credentials and file ownership stay consistent. Pressing A usually
+has nothing to render (see *Switching views* below); when it does, it takes
+that same path. Pressing D asks `inkycal-update.service` to check GitHub and,
+if the checkout is behind, apply the update immediately instead of waiting
+for the next scheduled window.
+
+### Switching views
+
+Every render draws both views, not just the one on screen, and keeps a copy
+of the hidden one next to `state.json` (`frame_daily.png`,
+`frame_weekly.png`). Both views come out of the same calendar fetch — today
+and tomorrow are the first two of the weekly view's seven days — so this adds
+no network round trips; the hidden view is only redrawn when its content
+changes, or once its copy is 40 minutes old.
+
+So button A normally skips the fetch entirely: the saved copy of the other
+view goes straight up, and the panel starts refreshing a few seconds after
+the press. That's one full refresh, where it used to be a notice, a 10–60
+second fetch and then a second refresh. Right after, the same check the
+quarter-hour timer runs compares that copy against the calendars; if
+anything changed since it was drawn, the panel repaints once more with the
+update.
+
+A saved copy is only used if it was drawn today and less than an hour ago.
+When there isn't one — late in the overnight sleep window, say, when nothing
+is being redrawn — the press takes the slow path described next.
 
 ### Seeing that a press registered
 
@@ -58,7 +82,8 @@ view… please wait*, *Refreshing… please wait* or *Checking for updates…
 please wait*. The panel begins its visible flash a few seconds after the
 press, which is the acknowledgement; the real content lands when the fetch
 finishes, and for button D when the update run finishes (so the notice stays
-up for the whole install).
+up for the whole install). Button A only needs its notice when it has no
+fresh saved copy to switch to.
 
 A press that arrives while the previous one is still being acted on is
 dropped, not queued — somebody pressing again because they aren't sure the

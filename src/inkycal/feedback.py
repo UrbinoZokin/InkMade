@@ -18,9 +18,13 @@ selects:
     none   - no acknowledgement; the display stays put until content is ready
 
 Rendering the calendar again is not an option here (that's the slow part we
-are covering for), so `banner` redraws the last frame that main.run_once
-cached next to state.json. If that file is missing or stale-shaped, it falls
-back to `wipe`.
+are covering for), so `banner` redraws the frame of the view on screen that
+main.run_once saved next to state.json (see inkycal.frames). If that file is
+missing or stale-shaped, it falls back to `wipe`.
+
+The view button usually needs none of this: when the other view has a fresh
+saved frame, inkycal.viewswap puts that straight up instead, and the frame
+itself is the acknowledgement.
 
 Runs as its own entrypoint (`python -m inkycal.feedback --message ...`) so a
 press pays only for PIL and the config loader, not the Google/CalDAV import
@@ -28,59 +32,28 @@ chain that inkycal.main pulls in.
 """
 from __future__ import annotations
 
-import os
 from typing import Optional
 
 from PIL import Image, ImageDraw
 
-from .config import load_config
+from .config import CONFIG_PATH_DEFAULT, load_config
 from .display_inky import show_on_inky
+from .frames import load_frame
 from .render import _load_bold_font, _load_font, _wrap_text
-from .state import load_state, save_state
+from .state import STATE_PATH_DEFAULT, load_state, save_state
 
 STYLE_BANNER = "banner"
 STYLE_WIPE = "wipe"
 STYLE_NONE = "none"
 VALID_STYLES = (STYLE_BANNER, STYLE_WIPE, STYLE_NONE)
 
-# Cached copy of the last frame pushed to the panel, written by
-# main.run_once and read back here to draw the banner over.
-LAST_FRAME_NAME = "last_frame.png"
-
-
-def last_frame_path(state_path: str) -> str:
-    return os.path.join(os.path.dirname(state_path) or ".", LAST_FRAME_NAME)
-
-
-def save_last_frame(state_path: str, img: Image.Image) -> None:
-    """Cache the frame just shown, for the banner style to draw over.
-
-    Best effort: a render that can't cache its frame is still a good render,
-    so failures here only cost the next press its banner.
-    """
-    path = last_frame_path(state_path)
-    tmp = path + ".tmp"
-    try:
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        img.convert("RGB").save(tmp, format="PNG")
-        os.replace(tmp, path)
-    except (OSError, ValueError) as e:
-        print(f"Could not cache last frame at {path}: {e}")
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-
 
 def load_last_frame(state_path: str, canvas_w: int, canvas_h: int) -> Optional[Image.Image]:
-    """The cached frame, or None if it is missing, unreadable or a different size."""
-    path = last_frame_path(state_path)
-    try:
-        with Image.open(path) as img:
-            img.load()
-            frame = img.convert("RGB")
-    except (OSError, ValueError):
+    """The saved frame of the view on screen, or None if it is missing, unreadable or a different size."""
+    saved = load_frame(state_path, load_state(state_path).view_mode)
+    if saved is None:
         return None
+    frame, _info = saved
     if frame.size != (canvas_w, canvas_h):
         return None
     return frame
@@ -190,8 +163,6 @@ def show_notice(
 
 def main() -> None:
     import argparse
-
-    from .main import CONFIG_PATH_DEFAULT, STATE_PATH_DEFAULT
 
     ap = argparse.ArgumentParser(description="Show a short notice on the Inky display.")
     ap.add_argument("--message", required=True)

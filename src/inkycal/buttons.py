@@ -5,7 +5,7 @@ it as root for unprivileged GPIO access and permission to start other
 systemd units). Button presses are cheap triggers only: this process never
 touches the display, calendar credentials, or state file directly.
 
-  A (pin_view)    - toggle daily/weekly view, then force a refresh
+  A (pin_view)    - switch between the daily and weekly views
   B (pin_refresh) - force a refresh
   C (pin_unused)  - reserved, no handler
   D (pin_update)  - force an OTA update check/apply (bypasses apply_window)
@@ -16,6 +16,12 @@ first paints a short "working on it" notice via inkycal.feedback, so you can
 see the press landed. See `buttons.press_feedback` in config.yaml to change
 its style or turn it off. Presses arriving while that work is still running
 are dropped rather than queued, so impatient repeat presses cost nothing.
+
+The view button can usually skip both the notice and the fetch: every render
+keeps the view that isn't on screen drawn and saved, and inkycal.viewswap
+puts that frame straight up. An ordinary, unforced run of inkycal.main then
+follows, repainting only if the calendars changed since the frame was drawn.
+Without a fresh saved frame it falls back to the notice and a forced render.
 
 Every press is also echoed to the terminals of anyone currently logged in
 (SSH sessions and the local console), so you can watch which button someone
@@ -37,13 +43,15 @@ import os
 import pwd
 import subprocess
 import threading
+from typing import Callable
 
 from dotenv import dotenv_values
 
-from .config import load_config
+from .config import CONFIG_PATH_DEFAULT, load_config
 from .feedback import STYLE_NONE, resolve_style
-from .main import CONFIG_PATH_DEFAULT, STATE_PATH_DEFAULT
+from .state import STATE_PATH_DEFAULT
 from .updates import DEFAULT_APP_DIR
+from .viewswap import NO_FRESH_FRAME
 
 # scripts/ota_update.sh looks for this file next to state.json: its presence
 # means "apply a pending update now, regardless of apply_window." Using a
@@ -200,13 +208,70 @@ def _show_feedback(app_dir: str, config_path: str, state_path: str, message: str
         print(f"inkycal.feedback exited with code {result.returncode}")
 
 
-def _run_main(app_dir: str, config_path: str, state_path: str, *, toggle_view: bool) -> None:
-    args = ["--config", config_path, "--state", state_path, "--force"]
+def _run_main(
+    app_dir: str,
+    config_path: str,
+    state_path: str,
+    *,
+    toggle_view: bool,
+    force: bool = True,
+) -> None:
+    args = ["--config", config_path, "--state", state_path]
+    if force:
+        args.append("--force")
     if toggle_view:
         args.append("--toggle-view")
     result = _run_as_app_user(app_dir, "inkycal.main", args)
     if result.returncode != 0:
         print(f"inkycal.main exited with code {result.returncode}")
+
+
+def _show_saved_view(app_dir: str, config_path: str, state_path: str, *, echo: bool) -> bool:
+    """Switch to the other view from its saved frame (inkycal.viewswap). True if it did.
+
+    False means the press still needs the slow path. viewswap records the
+    switch only as its very last step, so after a False state.json still
+    names the old view and the slow path's toggle still goes the right way.
+    """
+    try:
+        result = _run_as_app_user(
+            app_dir,
+            "inkycal.viewswap",
+            ["--config", config_path, "--state", state_path],
+            # One full-panel refresh, the same as a press notice.
+            timeout=FEEDBACK_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        _announce(f"Switching to the saved view timed out after {FEEDBACK_TIMEOUT_S}s; fetching it instead", echo=echo)
+        return False
+    except Exception as e:
+        _announce(f"Switching to the saved view failed: {e}; fetching it instead", echo=echo)
+        return False
+    if result.returncode == NO_FRESH_FRAME:
+        return False
+    if result.returncode != 0:
+        print(f"inkycal.viewswap exited with code {result.returncode}; fetching the view instead")
+        return False
+    return True
+
+
+def _switch_view(
+    app_dir: str,
+    config_path: str,
+    state_path: str,
+    acknowledge: Callable[[str], None],
+    *,
+    echo: bool,
+) -> None:
+    """Toggle daily/weekly: straight to the saved frame if there's a fresh one, else notice and render."""
+    if _show_saved_view(app_dir, config_path, state_path, echo=echo):
+        # The saved frame can be up to a quarter hour behind the calendars.
+        # Check it the way the timer would -- unforced, so the panel is only
+        # repainted if something changed since the frame was drawn.
+        _run_main(app_dir, config_path, state_path, toggle_view=False, force=False)
+        return
+    acknowledge("Switching view... please wait")
+    _run_main(app_dir, config_path, state_path, toggle_view=True)
 
 
 def _trigger_force_update(state_path: str) -> bool:
@@ -294,8 +359,7 @@ def main() -> None:
         _announce("Button A (view) pressed: toggling daily/weekly view", echo=echo)
 
         def work() -> None:
-            acknowledge("Switching view... please wait")
-            _run_main(app_dir, config_path, state_path, toggle_view=True)
+            _switch_view(app_dir, config_path, state_path, acknowledge, echo=echo)
 
         _run_guarded("Button A (view)", work, echo=echo)
 
