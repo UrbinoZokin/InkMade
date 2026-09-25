@@ -22,7 +22,13 @@ def repo_with_origin(tmp_path):
     work = tmp_path / "seed"
     app = tmp_path / "app"
 
-    subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)
+    # --initial-branch: the clone below checks out whatever origin's HEAD names,
+    # which is otherwise the runner's init.defaultBranch (often still "master").
+    subprocess.run(
+        ["git", "init", "--bare", "--initial-branch=main", str(origin)],
+        check=True,
+        capture_output=True,
+    )
 
     # Seed the origin with one commit on main.
     subprocess.run(["git", "init", str(work)], check=True, capture_output=True)
