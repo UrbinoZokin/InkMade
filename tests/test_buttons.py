@@ -1,4 +1,5 @@
 import os
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -168,7 +169,9 @@ def test_show_feedback_never_blocks_the_work_it_announces(tmp_path, monkeypatch,
 def test_run_guarded_acts_on_a_press_when_nothing_is_in_flight():
     ran = []
 
-    assert buttons._run_guarded("Button B (refresh)", lambda: ran.append("work"), echo=False) is True
+    worker = buttons._run_guarded("Button B (refresh)", lambda: ran.append("work"), echo=False)
+
+    worker.join(timeout=5)
     assert ran == ["work"]
 
 
@@ -178,7 +181,7 @@ def test_run_guarded_drops_a_press_arriving_while_the_previous_one_is_still_work
     # A press landing mid-refresh means the panel hasn't visibly answered the
     # first one yet -- not that a second refresh is wanted behind it.
     with buttons._WORK_LOCK:
-        assert buttons._run_guarded("Button B (refresh)", lambda: ran.append("work"), echo=False) is False
+        assert buttons._run_guarded("Button B (refresh)", lambda: ran.append("work"), echo=False) is None
 
     assert ran == []
     assert "already working on the previous press" in capsys.readouterr().out
@@ -188,12 +191,67 @@ def test_run_guarded_releases_the_lock_when_the_work_fails(capsys):
     def boom():
         raise RuntimeError("display busy")
 
-    assert buttons._run_guarded("Button A (view)", boom, echo=False) is True
+    buttons._run_guarded("Button A (view)", boom, echo=False).join(timeout=5)
     assert "Button A (view) failed: display busy" in capsys.readouterr().out
 
     # A failed press must not wedge every press after it.
     ran = []
-    assert buttons._run_guarded("Button A (view)", lambda: ran.append("work"), echo=False) is True
+    buttons._run_guarded("Button A (view)", lambda: ran.append("work"), echo=False).join(timeout=5)
+    assert ran == ["work"]
+
+
+def test_presses_arriving_during_the_work_are_dropped_not_queued():
+    # gpiozero hands every press to its handler from one thread (lgpio's
+    # notification thread) and only hands over the next once the handler has
+    # returned. A handler that did the work itself held each repeat press back
+    # until the work was done, then ran it anyway: three impatient presses,
+    # three full refresh cycles, one after another.
+    finish = threading.Event()
+    ran = []
+
+    def slow_work():
+        ran.append("work")
+        finish.wait(timeout=5)
+
+    workers = []
+
+    def deliver_three_presses():
+        for _ in range(3):
+            workers.append(buttons._run_guarded("Button A (view)", slow_work, echo=False))
+
+    delivery = threading.Thread(target=deliver_three_presses)
+    delivery.start()
+    try:
+        delivery.join(timeout=2)
+        handed_over_while_working = not delivery.is_alive()
+    finally:
+        finish.set()
+        delivery.join(timeout=15)
+        for worker in workers:
+            if isinstance(worker, threading.Thread):
+                worker.join(timeout=5)
+
+    assert handed_over_while_working, "each press must be handed over while the first is still working"
+    assert ran == ["work"]
+    assert [worker is None for worker in workers] == [False, True, True]
+
+
+def test_a_press_whose_work_cannot_start_does_not_lock_out_the_next(monkeypatch, capsys):
+    class NoThreads:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(buttons, "threading", SimpleNamespace(Thread=NoThreads))
+
+    assert buttons._run_guarded("Button B (refresh)", lambda: None, echo=False) is None
+    assert "Button B (refresh) failed: can't start new thread" in capsys.readouterr().out
+
+    monkeypatch.undo()
+    ran = []
+    buttons._run_guarded("Button B (refresh)", lambda: ran.append("work"), echo=False).join(timeout=5)
     assert ran == ["work"]
 
 
