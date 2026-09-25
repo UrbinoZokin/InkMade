@@ -24,6 +24,9 @@
 #
 #     sudo systemctl start inkycal-boot.service
 #
+# which is also how install.sh and ota_update.sh paint the panel when they
+# finish.
+#
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/inkycal}"

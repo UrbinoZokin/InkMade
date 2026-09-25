@@ -149,3 +149,14 @@ def test_installer_triggers_a_refresh_through_the_boot_unit():
 def test_ota_arms_the_boot_unit_for_devices_that_never_rerun_install():
     """A device that gets this over the air must still boot-refresh next time."""
     assert any(BOOT_UNIT in line for line in _enable_lines(OTA_SH))
+
+
+def test_ota_forces_its_render_after_applying():
+    """Updates are applied in the sleep window, where a plain inkycal.service
+    run skips the panel once the night's banner is up: "Update pending" -- or
+    button D's "Checking for updates..." notice -- would stay until morning."""
+    text = OTA_SH.read_text(encoding="utf-8")
+
+    assert re.search(rf"systemctl start .*{re.escape(BOOT_UNIT)}", text), (
+        "ota_update.sh should repaint through the unit that forces it, as install.sh does"
+    )

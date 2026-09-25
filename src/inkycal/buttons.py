@@ -281,10 +281,11 @@ def _trigger_force_update(state_path: str) -> bool:
     currently showing a "checking for updates" notice, and knowing when the
     check is done is what lets us take that notice back off. Two ways we may
     not see the end of it: the run takes longer than UPDATE_TIMEOUT_S, or it
-    applied an update that changed systemd/ and restarted this very daemon
-    from under us. Both are covered -- ota_update.sh triggers its own render
-    after applying, and the notice clears the stored render hash so the next
-    scheduled run repaints regardless.
+    applied an update, after which ota_update.sh restarts this very daemon
+    from under us. An applied update is covered by the forced render
+    ota_update.sh starts after applying it; otherwise the notice cleared the
+    stored render hash, so the next scheduled run outside the sleep window
+    repaints regardless.
     """
     flag_path = os.path.join(os.path.dirname(state_path) or ".", FORCE_UPDATE_FLAG_NAME)
     try:

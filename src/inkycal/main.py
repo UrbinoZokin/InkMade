@@ -6,7 +6,7 @@ import os
 import re
 import unicodedata
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Callable, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -46,6 +46,22 @@ def _is_in_sleep_window(now: datetime, start: time, end: time) -> bool:
     if start < end:
         return start <= t < end
     return (t >= start) or (t < end)
+
+
+def _sleep_window_start_date(now: datetime, start: time, end: time) -> date:
+    """The date the sleep window `now` falls in started on.
+
+    This is what keys the once-a-night sleep banner. An overnight window
+    (22:30 -> 06:30) spans two calendar dates, and its small hours belong to
+    the window that started the evening before. Keyed on the calendar date
+    instead, the banner was painted a second time at midnight, and the next
+    evening's window then looked as if it already had one, so that night's
+    banner waited until midnight too.
+    """
+    t = now.timetz().replace(tzinfo=None)
+    if start > end and t < end:
+        return now.date() - timedelta(days=1)
+    return now.date()
 
 
 def _today_range(now: datetime, tz: ZoneInfo):
@@ -661,12 +677,13 @@ def run_once(
     in_sleep = cfg.sleep.enabled and _is_in_sleep_window(now, sleep_start, sleep_end)
 
     # Sleep-start banner logic:
-    # If we just entered sleep window today and haven't applied banner yet, we will render once with banner.
-    today_str = now.strftime("%Y-%m-%d")
+    # If we just entered tonight's sleep window and haven't applied banner yet, we will render once with banner.
+    # Past midnight, tonight is still the window that started yesterday (see _sleep_window_start_date).
+    night = _sleep_window_start_date(now, sleep_start, sleep_end).isoformat()
     should_apply_sleep_banner = False
     if cfg.sleep.enabled and in_sleep:
-        # Apply banner once per day when in sleep window
-        if state.last_sleep_banner_date != today_str:
+        # Apply banner once per night when in sleep window
+        if state.last_sleep_banner_date != night:
             should_apply_sleep_banner = True
 
     # During sleep: do nothing unless we need to apply the banner refresh
@@ -748,7 +765,7 @@ def run_once(
         state.last_hash = sig
         state.last_rendered_iso = now.isoformat()
         if should_apply_sleep_banner:
-            state.last_sleep_banner_date = today_str
+            state.last_sleep_banner_date = night
         save_state(state_path, state)
         painted = True
 

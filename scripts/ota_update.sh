@@ -8,7 +8,7 @@
 #   - refreshes the editable package install only when pyproject.toml changed
 #   - reinstalls the systemd units only when systemd/ changed
 #   - restarts the provisioning agent if it is running
-#   - triggers a fresh display render with the new code
+#   - forces a fresh display render with the new code
 #
 # It is normally run by inkycal-update.service on the inkycal-update.timer
 # schedule, but can also be triggered by hand:
@@ -239,9 +239,16 @@ if systemctl is-active --quiet inkycal-buttons.service; then
   systemctl restart inkycal-buttons.service || true
 fi
 
-# Trigger an immediate re-render with the new code. --no-block so we don't wait
-# on the render service's ExecStartPre sleep.
-log "Update applied (${NEW:0:9}). Triggering a display refresh..."
-systemctl start --no-block inkycal.service || true
+# Re-render with the new code, and force it. Updates are normally applied in
+# the sleep window, where an unforced render returns early once the night's
+# banner is up: "Update pending" would stay on the panel until morning, and so
+# would button D's "Checking for updates..." notice (restarting the button
+# daemon above killed the render it was waiting to run). inkycal-boot.service
+# is the unit that forces a repaint, as install.sh uses it; a device without it
+# gets the plain render. --no-block so this service isn't held open meanwhile.
+log "Update applied (${NEW:0:9}). Forcing a display refresh..."
+systemctl start --no-block inkycal-boot.service \
+  || systemctl start --no-block inkycal.service \
+  || true
 
 log "Done."

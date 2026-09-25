@@ -270,7 +270,8 @@ applies the update:
 - reinstalls Python dependencies only when `requirements.txt` changed
 - reinstalls the systemd units only when anything under `systemd/` changed
 - restarts the provisioning agent if it's running
-- triggers a fresh display render with the new code
+- forces a fresh display render with the new code, so "Update pending" comes
+  off the screen straight away, even overnight
 
 By default this is done **only during the overnight sleep window**, so the
 screen never restarts while someone's looking at it during the day (it shows the
