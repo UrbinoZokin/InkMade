@@ -289,7 +289,9 @@ auto_update:
 Useful commands (on the Pi):
 
 ```bash
-# Update right now instead of waiting for the timer
+# Update right now instead of waiting for the overnight window (what button D
+# does). Without the flag file this only checks, and applies overnight.
+sudo touch /var/lib/inkycal/force_update
 sudo systemctl start inkycal-update.service
 
 # Watch what it did
@@ -301,6 +303,16 @@ systemctl list-timers inkycal-update.timer
 # Turn auto-updates off entirely
 sudo systemctl disable --now inkycal-update.timer
 ```
+
+> **If `journalctl -u inkycal-update.service` shows `fatal: $HOME not set`**, the
+> device has an older updater that dies before it fetches anything, so
+> "Update pending" never clears — and it can't install its own fix. Run it by
+> hand once; updates are automatic from then on:
+>
+> ```bash
+> sudo touch /var/lib/inkycal/force_update    # apply now, not overnight
+> sudo -H /opt/inkycal/scripts/ota_update.sh  # -H gives it the $HOME it needs
+> ```
 
 > **Note:** the updater does a `git reset --hard` to the tracked branch, so the
 > device always converges to GitHub's `main`. Your `config.yaml`, `.env` and
