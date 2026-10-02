@@ -305,7 +305,8 @@ applies the update:
   `requirements-provisioning.txt` changed, on a device that has the agent
 - restarts the setup agent only if it's the always-on kind from before setup
   mode (a setup session in progress is left to finish)
-- triggers a fresh display render with the new code
+- forces a fresh display render with the new code, so "Update pending" comes
+  off the screen straight away, even overnight
 
 By default this is done **only during the overnight sleep window**, so the
 screen never restarts while someone's looking at it during the day (it shows the

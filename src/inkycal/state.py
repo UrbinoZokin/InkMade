@@ -18,7 +18,9 @@ def toggle_view_mode(current: str) -> str:
 class State:
     last_hash: str = ""
     last_rendered_iso: str = ""
-    last_sleep_banner_date: str = ""  # YYYY-MM-DD when banner was last applied
+    # The night the sleep banner was last painted for, as the YYYY-MM-DD its
+    # sleep window started on: the evening's date, even after midnight.
+    last_sleep_banner_date: str = ""
     view_mode: str = "daily"  # one of VIEW_MODES; set by the view-toggle button
 
 def load_state(path: str) -> State:

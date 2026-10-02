@@ -35,10 +35,19 @@ pytestmark = pytest.mark.skipif(
 )
 
 # Records each call, and reports every service inactive so the updater skips
-# its restarts. "start --no-block inkycal.service" in the log means it applied.
+# its restarts. "start --no-block inkycal-boot.service" in the log -- the
+# forced render -- means it applied.
 STUB_SYSTEMCTL = """#!/bin/sh
 echo "$*" >> "$(dirname "$0")/systemctl.log"
 [ "$1" = "is-active" ] && exit 3
+exit 0
+"""
+
+# The same, on a device where inkycal-boot.service won't start (5: not found).
+STUB_SYSTEMCTL_NO_BOOT_UNIT = """#!/bin/sh
+echo "$*" >> "$(dirname "$0")/systemctl.log"
+[ "$1" = "is-active" ] && exit 3
+[ "$*" = "start --no-block inkycal-boot.service" ] && exit 5
 exit 0
 """
 
@@ -161,9 +170,30 @@ def test_applies_a_pending_update_without_home(tmp_path):
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert _git(dev.app, "rev-parse", "HEAD") == new
-    assert "start --no-block inkycal.service" in dev.systemctl_calls(), (
-        "applied the update but never asked for a render with the new code"
+    calls = dev.systemctl_calls()
+    # Forced: updates land in the sleep window, where a plain render returns
+    # early once the night's banner is up and leaves "Update pending" until
+    # morning.
+    assert "start --no-block inkycal-boot.service" in calls, (
+        "applied the update but never asked for a forced render with the new code"
     )
+    assert "start --no-block inkycal.service" not in calls, "one full repaint is enough"
+
+
+def test_falls_back_to_the_plain_render_without_the_boot_unit(tmp_path):
+    """A device where inkycal-boot.service won't start still gets the render it
+    always got."""
+    dev = _make_device(tmp_path)
+    (dev.bin / "systemctl").write_text(STUB_SYSTEMCTL_NO_BOOT_UNIT, encoding="utf-8")
+    dev.push("v2")
+
+    result = dev.run_updater()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert dev.systemctl_calls().splitlines()[-2:] == [
+        "start --no-block inkycal-boot.service",
+        "start --no-block inkycal.service",
+    ]
 
 
 @pytest.fixture

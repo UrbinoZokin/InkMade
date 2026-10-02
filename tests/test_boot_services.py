@@ -159,3 +159,14 @@ def test_a_fresh_install_keeps_the_secrets_private():
 
     assert re.search(r'chmod 600 "\$ENV_FILE"', text), ".env should be readable by the app's user alone"
     assert re.search(r'chmod 700 "\$APP_DIR/secrets" "\$STATE_DIR"', text)
+
+
+def test_ota_forces_its_render_after_applying():
+    """Updates are applied in the sleep window, where a plain inkycal.service
+    run skips the panel once the night's banner is up: "Update pending" -- or
+    button D's "Checking for updates..." notice -- would stay until morning."""
+    text = OTA_SH.read_text(encoding="utf-8")
+
+    assert re.search(rf"systemctl start .*{re.escape(BOOT_UNIT)}", text), (
+        "ota_update.sh should repaint through the unit that forces it, as install.sh does"
+    )
