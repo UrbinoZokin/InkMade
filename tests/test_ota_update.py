@@ -16,6 +16,7 @@ import os
 import pwd
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -252,3 +253,95 @@ def test_the_updater_looks_for_the_setup_marker_where_the_agent_writes_it():
 
     assert python_default and shell_default
     assert shell_default.group(1) == python_default.group(1)
+
+
+def _mode(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+def test_the_updater_makes_the_secrets_private(tmp_path):
+    """.env holds the iCloud password and secrets/ the Google token; the state
+    directory keeps pictures of the schedule. Installs from before this was
+    enforced left all of them readable by every account on the Pi."""
+    dev = _make_device(tmp_path)
+    env = dev.app / ".env"
+    env.write_text('ICLOUD_APP_PASSWORD="abcd-efgh-ijkl-mnop"\n', encoding="utf-8")
+    env.chmod(0o644)
+    secrets = dev.app / "secrets"
+    secrets.mkdir(mode=0o755)
+    token = secrets / "google_token.json"
+    token.write_text("{}", encoding="utf-8")
+    token.chmod(0o644)
+    dev.state.chmod(0o755)
+
+    result = dev.run_updater()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _mode(env) == 0o600
+    assert _mode(secrets) == 0o700
+    assert _mode(token) == 0o600
+    assert _mode(dev.state) == 0o700
+
+
+def test_the_updater_only_locks_down_what_the_app_user_owns(device_owned_by_nobody):
+    """Making private something the app's user doesn't own would lock the
+    render out of it -- a calendar that stops, to keep a secret from itself."""
+    dev = device_owned_by_nobody
+    env = dev.app / ".env"
+    env.write_text('ICLOUD_APP_PASSWORD="abcd-efgh-ijkl-mnop"\n', encoding="utf-8")
+    env.chmod(0o644)
+    _run("chown", "-R", "nobody:", str(dev.root))
+    os.chown(dev.state, 0, 0)
+    dev.state.chmod(0o755)
+
+    result = dev.run_updater()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _mode(env) == 0o600
+    assert _mode(dev.state) == 0o755, "root's directory: not the updater's to make private"
+
+
+# The provisioning installer, standing in for the real one (which runs apt).
+STUB_PROVISIONING_INSTALLER = """#!/bin/sh
+touch "$(dirname "$0")/../../provisioning-installer-ran"
+"""
+
+STUB_SYSTEMCTL_NO_AGENT = """#!/bin/sh
+echo "$*" >> "$(dirname "$0")/systemctl.log"
+[ "$1" = "is-active" ] && exit 3
+[ "$1" = "is-enabled" ] && exit 1
+exit 0
+"""
+
+
+def _push_files(dev: Device, files: dict, message: str) -> None:
+    for name, text in files.items():
+        path = dev.seed / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    _git(dev.seed, "add", "-A")
+    _git(dev.seed, "commit", "-qm", message)
+    _git(dev.seed, "push", "-q", "origin", "main")
+
+
+@pytest.mark.parametrize("agent_installed", [True, False], ids=["agent-installed", "no-agent"])
+def test_new_setup_agent_dependencies_are_installed_where_the_agent_is(tmp_path, agent_installed):
+    """They come from apt, through the provisioning installer, not from
+    requirements.txt -- so without this a device would update into a setup
+    agent it can't start."""
+    dev = _make_device(tmp_path)
+    if not agent_installed:
+        (dev.bin / "systemctl").write_text(STUB_SYSTEMCTL_NO_AGENT, encoding="utf-8")
+    _push_files(
+        dev,
+        {
+            "scripts/install_provisioning.sh": STUB_PROVISIONING_INSTALLER,
+            "requirements-provisioning.txt": "spake2==0.9\n",
+        },
+        "needs spake2",
+    )
+
+    result = dev.run_updater()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (dev.root / "provisioning-installer-ran").exists() is agent_installed

@@ -12,11 +12,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from inkycal import setupmode
-from inkycal.provisioning import agent, wifi
-from inkycal.provisioning.ble import BleProvisioner
-from inkycal.provisioning.protocol import STATUS_CONNECTED, STATUS_FAILED
-from inkycal.provisioning.session import SetupSession
+pytest.importorskip("spake2")
+
+from inkycal import setupmode  # noqa: E402
+from inkycal.provisioning import agent, setupcrypto, wifi  # noqa: E402
+from inkycal.provisioning.ble import BleProvisioner  # noqa: E402
+from inkycal.provisioning.protocol import STATUS_CONNECTED, STATUS_FAILED  # noqa: E402
+from inkycal.provisioning.session import SetupSession  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -323,7 +325,7 @@ def test_restoring_prefers_the_repaint_that_ignores_the_sleep_window(monkeypatch
     assert all("--no-block" in cmd for cmd in calls)
 
 
-# --- Bluetooth: no connect without the code -------------------------------
+# --- Bluetooth: WiFi settings travel sealed --------------------------------
 
 
 @pytest.fixture
@@ -332,58 +334,127 @@ def provisioner(monkeypatch):
     monkeypatch.setattr(wifi, "configure_wifi", lambda ssid, psk: joined.append((ssid, psk)) or (True, "Connected"))
     monkeypatch.setattr(wifi, "status", _online)
     session = SetupSession("482913", max_wrong=5)
-    prov = BleProvisioner(info_provider=dict, session=session)
-    prov._on_write_ssid(list(b"Home"), {})
-    prov._on_write_psk(list(b"hunter22"), {})
-    return prov, session, joined
+    return BleProvisioner(info_provider=dict, session=session), session, joined
+
+
+def _framed(payload: bytes) -> bytes:
+    return len(payload).to_bytes(2, "big") + payload
+
+
+def _write(callback, data: bytes, piece=None) -> None:
+    """Hand `data` to a write callback whole -- or, as BlueZ hands over a long
+    write, in pieces of `piece` bytes, each with its offset."""
+    if piece is None:
+        callback(list(data), {})
+        return
+    for offset in range(0, len(data), piece):
+        callback(list(data[offset:offset + piece]), {"offset": offset})
+
+
+def _pair(prov, code="482913", piece=None):
+    app = setupcrypto.AppHandshake(code)
+    _write(prov._on_write_pair, _framed(app.message), piece)
+    return app.finish(bytes(prov._read_pair({})))
+
+
+def _send_wifi(prov, channel, piece=None, ssid="Home", psk="hunter22") -> None:
+    sealed = channel.seal(json.dumps({"ssid": ssid, "psk": psk}).encode("utf-8"), setupcrypto.WIFI)
+    _write(prov._on_write_wifi, _framed(sealed), piece)
 
 
 def _status(prov) -> dict:
     return json.loads(bytes(prov._read_status()).decode("utf-8"))
 
 
-def test_ble_connect_without_the_code_is_refused(provisioner):
+def test_ble_wifi_settings_sealed_with_the_code_are_applied(provisioner):
     prov, session, joined = provisioner
 
-    prov._on_write_command(list(b"connect"), {})
+    _send_wifi(prov, _pair(prov))
+    _wait(lambda: _status(prov)["state"] == STATUS_CONNECTED)
 
-    assert _status(prov)["state"] == STATUS_FAILED
-    assert "setup code" in _status(prov)["message"]
-    assert joined == []
+    assert joined == [("Home", "hunter22")]
     assert session.wrong_codes_left == 5
 
 
-def test_ble_connect_with_a_wrong_code_is_refused_and_counted(provisioner):
+def test_ble_wifi_settings_under_a_wrong_code_are_refused_and_counted(provisioner):
     prov, session, joined = provisioner
 
-    prov._on_write_code(list(b"000000"), {})
-    prov._on_write_command(list(b"connect"), {})
+    _send_wifi(prov, _pair(prov, code="000000"))
 
     assert _status(prov)["state"] == STATUS_FAILED
+    assert "wrong" in _status(prov)["message"]
     assert joined == []
     assert session.wrong_codes_left == 4
 
 
-def test_ble_connect_with_the_code_joins_and_spends_it(provisioner):
+def test_ble_wifi_settings_without_a_key_exchange_are_refused_uncounted(provisioner):
     prov, session, joined = provisioner
+    elsewhere = setupcrypto.AppHandshake("482913")
+    _answer, _pi_side = setupcrypto.pi_handshake("482913", elsewhere.message)
+    channel = elsewhere.finish(_answer)
 
-    prov._on_write_code(list(b"482913"), {})
-    prov._on_write_command(list(b"connect"), {})
+    _send_wifi(prov, channel)
+
+    assert _status(prov)["state"] == STATUS_FAILED
+    assert joined == []
+    assert session.wrong_codes_left == 5
+
+
+def test_ble_each_exchange_carries_one_message(provisioner):
+    """A retry has to start a fresh exchange, so a recorded message can't be
+    replayed over the old one."""
+    prov, _session, joined = provisioner
+    channel = _pair(prov)
+    _send_wifi(prov, channel)
     _wait(lambda: _status(prov)["state"] == STATUS_CONNECTED)
 
-    assert joined == [("Home", "hunter22")]
-    # A second connect has to bring the code again.
-    prov._on_write_command(list(b"connect"), {})
+    _send_wifi(prov, channel, ssid="Again")
+
     assert _status(prov)["state"] == STATUS_FAILED
     assert joined == [("Home", "hunter22")]
 
 
-def test_ble_never_logs_the_code(provisioner, capsys):
+def test_ble_long_writes_arriving_in_pieces_are_put_back_together(provisioner):
+    """A piece opened on its own would fail -- and count as a wrong code."""
+    prov, session, joined = provisioner
+
+    _send_wifi(prov, _pair(prov, piece=7), piece=7)
+    _wait(lambda: _status(prov)["state"] == STATUS_CONNECTED)
+
+    assert joined == [("Home", "hunter22")]
+    assert session.wrong_codes_left == 5
+
+
+def test_ble_reads_of_the_answer_honour_the_offset(provisioner):
+    """BlueZ asks for the rest of a long value from an offset; bluezero hands
+    the read callback that offset and returns whatever it gets back."""
+    prov, _session, _joined = provisioner
+    app = setupcrypto.AppHandshake("482913")
+    _write(prov._on_write_pair, _framed(app.message))
+    whole = bytes(prov._read_pair({}))
+
+    assert bytes(prov._read_pair({"offset": 10})) == whole[10:]
+
+
+def test_ble_a_malformed_key_exchange_is_refused_uncounted(provisioner):
+    prov, session, _joined = provisioner
+
+    _write(prov._on_write_pair, _framed(b"not a key exchange"))
+
+    assert _status(prov)["state"] == STATUS_FAILED
+    assert prov._read_pair({}) == []
+    assert session.wrong_codes_left == 5
+
+
+def test_ble_never_logs_a_secret(provisioner, capsys):
     prov, _session, _joined = provisioner
 
-    prov._on_write_code(list(b"482913"), {})
+    _send_wifi(prov, _pair(prov))
+    _wait(lambda: _status(prov)["state"] == STATUS_CONNECTED)
 
-    assert "482913" not in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "hunter22" not in out
+    assert "482913" not in out
 
 
 # --- spotting a device with no WiFi network --------------------------------

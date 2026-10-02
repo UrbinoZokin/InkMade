@@ -27,6 +27,9 @@ import os
 import time
 from typing import Optional
 
+# How long a session lasts, and how much more time each press of C gives it.
+SESSION_MINUTES = 10
+
 # /run is a tmpfs: nothing here outlives a reboot, so a session cut short by a
 # power cut can never leave the panel held for one that no longer exists.
 MARKER_PATH = os.environ.get("INKYCAL_SETUP_MARKER", "/run/inkycal/setup-mode.json")

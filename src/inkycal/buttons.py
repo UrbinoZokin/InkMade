@@ -56,7 +56,7 @@ from . import setupmode
 from .appuser import owner_groups as _app_owner_groups, owner_ids as _app_owner_ids
 from .config import CONFIG_PATH_DEFAULT, load_config
 from .feedback import STYLE_NONE, resolve_style
-from .provisioning.session import SESSION_MINUTES
+from .setupmode import SESSION_MINUTES
 from .state import STATE_PATH_DEFAULT
 from .updates import DEFAULT_APP_DIR
 from .viewswap import NO_FRESH_FRAME

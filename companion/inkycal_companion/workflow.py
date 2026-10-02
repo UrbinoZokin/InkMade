@@ -5,8 +5,9 @@ Bluetooth**: we try to find an already-online Pi over mDNS, and only fall
 back to BLE (to set up WiFi) when nothing answers on the network.
 
 The InkyCal only listens while setup mode is on (button C, or by itself
-before it has WiFi or a Google token), and every change has to carry the
-one-time setup code its screen shows.
+before it has WiFi or a Google token). Everything sent to it is sealed with a
+key that only the one-time setup code on its screen produces, and the code
+itself is never sent (setupcrypto.py).
 """
 from __future__ import annotations
 

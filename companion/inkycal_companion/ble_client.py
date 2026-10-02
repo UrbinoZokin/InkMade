@@ -11,23 +11,33 @@ import json
 from dataclasses import dataclass
 from typing import List, Optional
 
+from . import setupcrypto
 from .protocol import (
     BLE_LOCAL_NAME,
     BLE_SERVICE_UUID,
-    BLE_CHAR_SSID_UUID,
-    BLE_CHAR_PSK_UUID,
-    BLE_CHAR_COMMAND_UUID,
     BLE_CHAR_STATUS_UUID,
     BLE_CHAR_INFO_UUID,
-    BLE_CHAR_CODE_UUID,
-    CMD_CONNECT,
+    BLE_CHAR_PAIR_UUID,
+    BLE_CHAR_WIFI_UUID,
     STATUS_CONNECTED,
     STATUS_FAILED,
+)
+
+TOO_OLD = (
+    "This InkyCal's software is too old for this app: it can't encrypt what "
+    "you send it. Connect it to WiFi another way and press button D to update "
+    "it, then try again."
 )
 
 
 class BleError(RuntimeError):
     pass
+
+
+def _framed(payload: bytes) -> bytes:
+    # The Pi puts a value back together from however many writes it arrives
+    # in; the length up front tells it when it has the whole thing.
+    return len(payload).to_bytes(2, "big") + payload
 
 
 @dataclass
@@ -73,11 +83,13 @@ async def provision_wifi(
     setup_code: str,
     connect_timeout: float = 60.0,
 ) -> dict:
-    """Send WiFi credentials over BLE and wait for the Pi to join.
+    """Send WiFi credentials over BLE, sealed, and wait for the Pi to join.
 
-    `setup_code` is the one-time code on the InkyCal's screen; the Pi refuses
-    to connect without it. Returns the final status dict reported by the Pi
-    (includes its new IP).
+    `setup_code` is the one-time code on the InkyCal's screen. It never goes
+    over the air: it keys the exchange that seals the credentials
+    (setupcrypto.py), and the Pi refuses settings sealed under any other
+    code. Returns the final status dict reported by the Pi (includes its new
+    IP).
     """
     try:
         from bleak import BleakClient
@@ -87,15 +99,21 @@ async def provision_wifi(
     async with BleakClient(address, timeout=30.0) as client:
         if not client.is_connected:
             raise BleError("Could not connect to the device over Bluetooth.")
+        if client.services.get_characteristic(BLE_CHAR_PAIR_UUID) is None:
+            raise BleError(TOO_OLD)
 
-        await client.write_gatt_char(BLE_CHAR_SSID_UUID, ssid.encode("utf-8"), response=True)
-        await client.write_gatt_char(BLE_CHAR_PSK_UUID, psk.encode("utf-8"), response=True)
-        # An InkyCal from before setup mode has no code characteristic and
-        # asks for no code; anything newer refuses to connect without it.
-        if client.services.get_characteristic(BLE_CHAR_CODE_UUID) is not None:
-            await client.write_gatt_char(BLE_CHAR_CODE_UUID, setup_code.encode("utf-8"), response=True)
+        handshake = setupcrypto.AppHandshake(setup_code)
+        await client.write_gatt_char(BLE_CHAR_PAIR_UUID, _framed(handshake.message), response=True)
+        answer = bytes(await client.read_gatt_char(BLE_CHAR_PAIR_UUID))
+        if not answer:
+            status = await _read_json(client, BLE_CHAR_STATUS_UUID)
+            raise BleError(status.get("message") or "The InkyCal didn't answer the key exchange.")
+        try:
+            channel = handshake.finish(answer)
+        except setupcrypto.BadHandshake as exc:
+            raise BleError(f"The InkyCal's answer didn't make sense ({exc}).") from None
 
-        # Subscribe to status notifications before issuing the connect command.
+        # Subscribe to status notifications before sending the settings.
         final: dict = {}
         done = asyncio.Event()
 
@@ -116,9 +134,8 @@ async def provision_wifi(
         except Exception:
             pass  # fall back to polling below
 
-        await client.write_gatt_char(
-            BLE_CHAR_COMMAND_UUID, CMD_CONNECT.encode("utf-8"), response=True
-        )
+        sealed = channel.seal(json.dumps({"ssid": ssid, "psk": psk}).encode("utf-8"), setupcrypto.WIFI)
+        await client.write_gatt_char(BLE_CHAR_WIFI_UUID, _framed(sealed), response=True)
 
         try:
             await asyncio.wait_for(done.wait(), timeout=connect_timeout)

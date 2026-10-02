@@ -9,9 +9,9 @@ events show up on the display. No keyboard or monitor on the Pi required.
 
 0. **You press button C on the InkyCal.** That turns on *setup mode* for 10
    minutes, and the screen shows a one-time **setup code**. The InkyCal only
-   listens for the app while setup mode is on, and refuses anything that
-   doesn't carry that code. (One that has no WiFi or Google token yet starts
-   in setup mode by itself.)
+   listens for the app while setup mode is on, and refuses anything that isn't
+   sealed with that code. (One that has no WiFi or Google token yet starts in
+   setup mode by itself.)
 1. **Finds your InkyCal.** It looks on your WiFi first (via mDNS). If the Pi
    isn't online yet, it falls back to **Bluetooth**. You type in the setup
    code.
@@ -86,12 +86,20 @@ inkycal-companion --cli --credentials client_secret.json --host 192.168.1.50
 
 ## Setup code
 
-Every change the app makes — WiFi over Bluetooth, WiFi or the Google token over
-the network — has to carry the 6-digit code on the InkyCal's screen. The GUI
-asks for it in step 1; the CLI takes `--setup-code` (or asks). It is good for
-one setup session: 10 minutes after the last press of button C, until the
-Google token is delivered, or until 5 wrong codes have been tried, whichever
-comes first. After that, press C again for a new code.
+Everything the app sends — WiFi over Bluetooth, WiFi or the Google token over
+the network — is sealed with a key made from the 6-digit code on the
+InkyCal's screen, and only an InkyCal showing that code can open it. The code
+itself never leaves your computer: the app and the Pi agree the key with
+SPAKE2, a password-authenticated key exchange, so anyone listening sees only
+ciphertext and can't even test guesses at the code. The GUI asks for it in
+step 1; the CLI takes `--setup-code` (or asks). It is good for one setup
+session: 10 minutes after the last press of button C, until the Google token
+is delivered, or until 5 wrong codes have been tried, whichever comes first.
+After that, press C again for a new code.
+
+The app won't fall back to sending anything in the clear. An InkyCal whose
+software predates this says so instead: press button D on it to update it
+(over WiFi), then try again.
 
 If the app can't find the InkyCal, check that its screen shows a setup code —
 outside setup mode it isn't listening at all.

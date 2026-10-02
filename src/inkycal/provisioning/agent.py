@@ -10,10 +10,12 @@ agent exposes two transports so the companion app can configure the device:
                      used to deliver the Google OAuth token.
 
 Each session gets a fresh one-time code, shown only on the panel
-(inkycal.setupscreen), and both transports refuse any change that doesn't
-carry it. That is what takes the place of a permanently open, root-run API:
-outside a session nothing is listening at all, and inside one, changing the
-device means being able to see its screen.
+(inkycal.setupscreen). The code never leaves it: the app and the agent use it
+to agree a key (setupcrypto.py), and both transports only accept changes
+sealed with that key. That is what takes the place of a permanently open,
+root-run API: outside a session nothing is listening at all, and inside one,
+changing the device means being able to see its screen -- while anyone
+listening in sees only ciphertext.
 
 A session ends when its SESSION_MINUTES are up (each press of C restarts the
 clock), when the Google token arrives, after MAX_WRONG_CODES wrong codes, or
@@ -35,6 +37,7 @@ from typing import Optional
 
 from .. import appuser, setupmode
 from ..config import CONFIG_PATH_DEFAULT, load_config
+from ..setupmode import SESSION_MINUTES
 from ..state import STATE_PATH_DEFAULT
 from ..updates import DEFAULT_APP_DIR
 from . import tokenstore, wifi
@@ -42,7 +45,7 @@ from .ble import BleProvisioner
 from .httpserver import info_payload, serve
 from .mdns import MdnsAdvertiser
 from .protocol import HTTP_PORT
-from .session import SESSION_MINUTES, SetupSession
+from .session import SetupSession
 
 APP_DIR = os.environ.get("INKYCAL_APP_DIR", DEFAULT_APP_DIR)
 CONFIG_PATH = os.environ.get("INKYCAL_CONFIG", CONFIG_PATH_DEFAULT)

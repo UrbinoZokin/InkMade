@@ -27,6 +27,9 @@ echo "-- Creating directories..."
 sudo mkdir -p "$APP_DIR/secrets" "$STATE_DIR"
 sudo chown -R "$USER":"$USER" "$APP_DIR"
 sudo chown -R "$USER":"$USER" "$STATE_DIR"
+# The Google token (secrets/) and the state directory -- whose saved frames
+# are pictures of your schedule -- are for the app's user alone.
+sudo chmod 700 "$APP_DIR/secrets" "$STATE_DIR"
 
 # Externally-managed env fix: venv
 echo "-- Creating/updating venv at $VENV_DIR ..."
@@ -83,6 +86,13 @@ if [ ! -f "$ENV_FILE" ]; then
   fi
 else
   echo "✓ $ENV_FILE already exists"
+fi
+
+# .env holds your iCloud password: readable by the app's user alone. Copied
+# with a plain `cp`, it would be readable by every account on the Pi.
+if [ -f "$ENV_FILE" ]; then
+  sudo chown "$USER":"$USER" "$ENV_FILE"
+  sudo chmod 600 "$ENV_FILE"
 fi
 
 

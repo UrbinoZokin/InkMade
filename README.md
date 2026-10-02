@@ -124,9 +124,14 @@ setup agent (`inkycal-provisioning.service`), and the agent only runs while
   calendar comes back by itself.
 
 The companion app asks for the code, and the Pi refuses any change, over
-Bluetooth or WiFi, that doesn't carry it — so changing the device means being
-able to see its screen. Outside setup mode nothing is listening at all: no
-network port, no Bluetooth advertisement.
+Bluetooth or WiFi, that isn't sealed with it — so changing the device means
+being able to see its screen. The code itself is never sent: the app and the
+Pi use it to agree a key (SPAKE2, the kind of exchange HomeKit and
+Matter use to pair with a short code) and seal everything they send with it.
+Someone listening in on your network or within Bluetooth range sees only
+ciphertext — not your WiFi password, not your Google token, not even enough
+to test guesses at the code. Outside setup mode nothing is listening at all:
+no network port, no Bluetooth advertisement.
 
 Before setup mode, the agent ran all the time, as root. It took a new WiFi
 network from anyone in Bluetooth range, and a new WiFi network or Google token
@@ -296,6 +301,8 @@ applies the update:
 
 - reinstalls Python dependencies only when `requirements.txt` changed
 - reinstalls the systemd units only when anything under `systemd/` changed
+- reinstalls the setup agent's dependencies only when
+  `requirements-provisioning.txt` changed, on a device that has the agent
 - restarts the setup agent only if it's the always-on kind from before setup
   mode (a setup session in progress is left to finish)
 - triggers a fresh display render with the new code
@@ -344,7 +351,9 @@ sudo systemctl disable --now inkycal-update.timer
 
 > **Note:** the updater does a `git reset --hard` to the tracked branch, so the
 > device always converges to GitHub's `main`. Your `config.yaml`, `.env` and
-> `secrets/` are gitignored and are never touched. **Existing installs** need to
+> `secrets/` are gitignored and are never overwritten; on every run the updater
+> only makes sure `.env`, `secrets/` and `/var/lib/inkycal` can be read by the
+> app's user alone. **Existing installs** need to
 > register the new timer once — pull the code (command above) and re-run
 > `./scripts/install.sh` (or re-run the one-command bootstrap). After that the
 > updates are automatic and the installer step is never needed again.
@@ -387,7 +396,8 @@ The Pi runs headless, so the OAuth consent flow happens on another machine.
 
 2. Copy `google_token.json` to the Pi at the path referenced by
    `GOOGLE_TOKEN_JSON` in `/opt/inkycal/.env`
-   (default: `/opt/inkycal/secrets/google_token.json`).
+   (default: `/opt/inkycal/secrets/google_token.json`), and keep it private:
+   `chmod 600` it (the updater does the same for anything in `secrets/`).
 
 > **Birthdays:** Google keeps the birthdays it derives from Google Contacts in
 > a separate read-only calendar
