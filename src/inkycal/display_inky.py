@@ -18,6 +18,8 @@ from typing import Iterator, Optional, TextIO
 
 from PIL import Image
 
+from . import setupmode
+
 DISPLAY_LOCK_PATH = os.environ.get("INKYCAL_DISPLAY_LOCK", "/var/lib/inkycal/display.lock")
 
 # A full repaint of the 13.3" Impression takes the better part of a minute, and
@@ -99,10 +101,20 @@ def display_lock(
         handle.close()
 
 
-def show_on_inky(img: Image.Image, rotate_degrees: int = 0, border: str = "white") -> None:
+def show_on_inky(
+    img: Image.Image,
+    rotate_degrees: int = 0,
+    border: str = "white",
+    *,
+    setup_screen: bool = False,
+) -> None:
     """
     Displays a PIL image on Inky Impressions.
     Assumes the 'inky' library is installed on the Pi and hardware is connected.
+
+    While setup mode is on, the panel shows the code the companion app asks
+    for, and anything other than the setup screen itself (`setup_screen=True`)
+    raises setupmode.SetupModeActive instead of painting over it.
     """
     if img.mode != "P":
         img = img.convert("P")
@@ -116,6 +128,11 @@ def show_on_inky(img: Image.Image, rotate_degrees: int = 0, border: str = "white
     # SPI bus, so the whole hardware conversation happens under the lock. Only
     # the image work above is left outside it.
     with display_lock():
+        # Asked under the lock, not before taking it: a render that was already
+        # fetching when setup mode began waits here for the setup screen's own
+        # refresh, and must find out now rather than paint over the code.
+        if not setup_screen and setupmode.is_active():
+            raise setupmode.SetupModeActive("setup mode is showing its code on the panel")
         disp = auto(ask_user=False, verbose=False)
         if disp is None:
             raise RuntimeError("Could not auto-detect Inky display. Check wiring and SPI enabled.")

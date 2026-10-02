@@ -22,7 +22,8 @@ PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather
 - Nightly sleep window with one-time “Sleeping…” banner  
 - Weekly deep clean refresh to reduce ghosting  
 - Over-the-air updates (pulls new code from GitHub on its own — no SSH)  
-- Physical buttons: switch daily/weekly view, force refresh, force update  
+- Physical buttons: switch daily/weekly view, force refresh, setup mode, force update  
+- The setup agent only listens in setup mode, behind a one-time code shown on the screen  
 - Presses are acknowledged on the display before the slow work starts  
 - Switching views is a single refresh: the other view is kept drawn ahead of time  
 - One calendar fetch and one forecast download per update, however many events  
@@ -42,7 +43,7 @@ wired up as follows:
 | --- | --- |
 | A | Toggle between the daily view (default) and a weekly view showing the next 7 days' event names (no times) |
 | B | Force an immediate display refresh |
-| C | Unused (reserved for future use) |
+| C | Turn on setup mode for 10 minutes, so the companion app can change the WiFi network or Google account (see *Setup mode* below) |
 | D | Force an OTA update check, applying it right away if one is pending (bypasses the overnight `apply_window`) |
 
 Pressing B re-renders instantly using the same code path as the periodic
@@ -103,8 +104,34 @@ with `press_feedback` in `config.yaml`:
 | `wipe` | Clear the panel to a centred message |
 | `none` | No acknowledgement — the display stays put until the new content is ready |
 
-Button C shows nothing: no work follows it, so a notice would spend a full
-refresh announcing that nothing happened.
+Button C needs no notice: the setup code it puts on the screen is the
+acknowledgement.
+
+### Setup mode
+
+The companion app changes the WiFi network and Google account through the
+setup agent (`inkycal-provisioning.service`), and the agent only runs while
+**setup mode** is on:
+
+- Press **C** and the screen shows a one-time **setup code** within a minute.
+  Setup mode then stays on for 10 minutes; pressing C again restarts the 10
+  minutes.
+- An InkyCal with no Google token or WiFi network yet starts in setup mode by
+  itself at power-on. (Only using iCloud? Set `calendars.google.enabled:
+  false`, or the missing Google token counts.)
+- It ends after the 10 minutes, as soon as the Google token arrives, after 5
+  wrong codes, or when you press A, B or D — which then do nothing else. The
+  calendar comes back by itself.
+
+The companion app asks for the code, and the Pi refuses any change, over
+Bluetooth or WiFi, that doesn't carry it — so changing the device means being
+able to see its screen. Outside setup mode nothing is listening at all: no
+network port, no Bluetooth advertisement.
+
+Before setup mode, the agent ran all the time, as root. It took a new WiFi
+network from anyone in Bluetooth range, and a new WiFi network or Google token
+from anyone on your network unless `INKYCAL_PAIR_TOKEN` was set in `.env`.
+That setting is no longer used; the code on the screen replaces it.
 
 ### Watching presses over SSH
 
@@ -116,8 +143,7 @@ SSH'd into the Pi you'll see the button announce itself as it's pressed:
 ```
 
 Nothing to run or leave open — the line arrives in your shell (and on the
-local console) as it happens, including for button C, which has no function
-assigned. Presses always go to the journal too
+local console) as it happens. Presses always go to the journal too
 (`journalctl -u inkycal-buttons -f`); set `echo_to_terminals: false` if you'd
 rather have them there only.
 
@@ -129,7 +155,7 @@ buttons:
   enabled: true
   pin_view: 5
   pin_refresh: 6
-  pin_unused: 25
+  pin_setup: 25
   pin_update: 24
   bounce_time_ms: 300
   echo_to_terminals: true
@@ -139,7 +165,8 @@ buttons:
 Pin numbers are BCM GPIO numbers. The defaults match the 13.3" Inky
 Impression; button C is wired to GPIO25 on that model instead of the GPIO16
 used on the smaller 4"/5.7"/7.3" sizes — if you're on one of those, set
-`pin_unused: 16`. Set `enabled: false` to disable the daemon entirely (or
+`pin_setup: 16` (a config written before setup mode calls it `pin_unused`,
+which still works). Set `enabled: false` to disable the daemon entirely (or
 `sudo systemctl disable --now inkycal-buttons.service`).
 
 ---
@@ -172,7 +199,7 @@ the whole thing up with no keyboard, SSH or button press:
 | `inkycal-update.timer` | Checks GitHub for over-the-air updates, then every 30 min |
 | `inkycal-deepclean.timer` | Arms the weekly ghosting deep clean |
 | `inkycal-buttons.service` | Makes the physical buttons live |
-| `inkycal-provisioning.service` | BLE/mDNS setup agent, if you installed it |
+| `inkycal-provisioning.service` | Starts setup mode if there's no Google token or WiFi network yet, otherwise exits (if you installed it) |
 
 **Why the forced refresh.** E-ink holds its last image with the power off, and
 the quarter-hour render deliberately *skips* the panel when the schedule hasn't
@@ -269,7 +296,8 @@ applies the update:
 
 - reinstalls Python dependencies only when `requirements.txt` changed
 - reinstalls the systemd units only when anything under `systemd/` changed
-- restarts the provisioning agent if it's running
+- restarts the setup agent only if it's the always-on kind from before setup
+  mode (a setup session in progress is left to finish)
 - triggers a fresh display render with the new code
 
 By default this is done **only during the overnight sleep window**, so the
@@ -335,7 +363,9 @@ and delivers the token to the Pi — no keyboard or monitor on the Pi needed.
 cd /opt/inkycal && ./scripts/install_provisioning.sh
 ```
 
-This advertises the Pi over Bluetooth (`InkyCal-Setup`) and, once online, over
+The agent only runs in setup mode (see *Setup mode* above): press button C,
+and the screen shows the setup code the companion app asks for. While it runs,
+it advertises the Pi over Bluetooth (`InkyCal-Setup`) and, once online, over
 mDNS (`_inkycal._tcp`).
 
 **On your laptop**, build/run the companion app — see

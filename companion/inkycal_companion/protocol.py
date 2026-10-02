@@ -18,8 +18,14 @@ BLE_CHAR_PSK_UUID = "f0a40002-3c5a-4b9e-9b7a-1e2d3c4b5a60"
 BLE_CHAR_COMMAND_UUID = "f0a40003-3c5a-4b9e-9b7a-1e2d3c4b5a60"
 BLE_CHAR_STATUS_UUID = "f0a40004-3c5a-4b9e-9b7a-1e2d3c4b5a60"
 BLE_CHAR_INFO_UUID = "f0a40005-3c5a-4b9e-9b7a-1e2d3c4b5a60"
+BLE_CHAR_CODE_UUID = "f0a40006-3c5a-4b9e-9b7a-1e2d3c4b5a60"
 
 CMD_CONNECT = "connect"
+
+# The one-time setup code shown on the InkyCal's screen while setup mode is
+# on (button C). Every change has to carry it; over HTTP it goes in this header.
+CODE_HEADER = "X-Pairing-Token"
+CODE_DIGITS = 6
 
 STATUS_IDLE = "idle"
 STATUS_CONNECTING = "connecting"

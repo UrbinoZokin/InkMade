@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from inkycal import buttons, viewswap
+from inkycal import appuser, buttons, setupmode, viewswap
 
 
 def test_app_owner_ids_matches_directory_stat(tmp_path):
@@ -16,7 +16,7 @@ def test_app_owner_ids_matches_directory_stat(tmp_path):
 
 
 def test_app_owner_groups_falls_back_to_gid_on_lookup_failure(monkeypatch):
-    monkeypatch.setattr(buttons.pwd, "getpwuid", lambda uid: (_ for _ in ()).throw(KeyError(uid)))
+    monkeypatch.setattr(appuser.pwd, "getpwuid", lambda uid: (_ for _ in ()).throw(KeyError(uid)))
 
     groups = buttons._app_owner_groups(uid=999999, gid=42)
 
@@ -399,3 +399,77 @@ def test_switch_view_falls_back_to_a_notice_and_a_forced_toggle(monkeypatch):
 
     assert acks == ["Switching view... please wait"]
     assert runs == [{"toggle_view": True}]
+
+
+# --- button C: setup mode -------------------------------------------------
+
+
+@pytest.fixture
+def setup_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(setupmode, "MARKER_PATH", str(tmp_path / "run" / "setup-mode.json"))
+    monkeypatch.setattr(setupmode, "REQUEST_PATH", str(tmp_path / "run" / "setup-requested"))
+    monkeypatch.setattr(buttons, "SETUP_REQUEST_WAIT_S", 0.3)
+    monkeypatch.setattr(buttons, "_SETUP_POLL_S", 0.01)
+
+
+def test_button_c_asks_the_agent_for_a_session(setup_files, monkeypatch):
+    calls = []
+
+    def systemctl(cmd, **_kw):
+        calls.append(cmd)
+        setupmode.take_request()  # the agent starting up takes it
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(buttons.subprocess, "run", systemctl)
+
+    assert buttons._start_setup_mode(echo=False) is True
+    assert calls == [["systemctl", "start", "inkycal-provisioning.service"]]
+
+
+def test_button_c_tries_once_more_when_the_agent_was_on_its_way_out(setup_files, monkeypatch):
+    """`systemctl start` is a no-op on an agent that's still running -- and one
+    whose session just ended never reads the request. Starting it again after
+    it has gone gets a fresh agent that does."""
+    calls = []
+
+    def systemctl(cmd, **_kw):
+        calls.append(cmd)
+        if len(calls) == 2:
+            setupmode.take_request()
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(buttons.subprocess, "run", systemctl)
+
+    assert buttons._start_setup_mode(echo=False) is True
+    assert len(calls) == 2
+
+
+def test_button_c_without_the_agent_installed_says_so_and_leaves_nothing_behind(setup_files, monkeypatch, capsys):
+    monkeypatch.setattr(
+        buttons.subprocess,
+        "run",
+        lambda cmd, **_kw: SimpleNamespace(returncode=5, stderr="Unit inkycal-provisioning.service not found."),
+    )
+
+    assert buttons._start_setup_mode(echo=False) is False
+    assert "install_provisioning.sh" in capsys.readouterr().out
+    assert setupmode.request_pending() is False, "a stale request would start setup mode at some later boot"
+
+
+def test_button_c_gives_up_cleanly_when_no_agent_takes_the_request(setup_files, monkeypatch, capsys):
+    monkeypatch.setattr(buttons.subprocess, "run", lambda cmd, **_kw: SimpleNamespace(returncode=0, stderr=""))
+
+    assert buttons._start_setup_mode(echo=False) is False
+    assert setupmode.request_pending() is False
+    assert "journalctl" in capsys.readouterr().out
+
+
+def test_leaving_setup_mode_stops_the_agent_and_frees_the_panel(setup_files, monkeypatch):
+    calls = []
+    monkeypatch.setattr(buttons.subprocess, "run", lambda cmd, **_kw: calls.append(cmd) or SimpleNamespace(returncode=0))
+    setupmode.mark_active(600)
+
+    buttons._leave_setup_mode(echo=False)
+
+    assert calls == [["systemctl", "stop", "inkycal-provisioning.service"]]
+    assert setupmode.is_active() is False

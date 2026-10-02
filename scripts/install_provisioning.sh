@@ -61,12 +61,17 @@ sudo bluetoothctl power on || true
 echo "-- Installing systemd unit..."
 sudo cp "$APP_DIR/systemd/inkycal-provisioning.service" /etc/systemd/system/
 sudo systemctl daemon-reload
+# Enabled so a device that still has no Google token or WiFi network comes up
+# in setup mode by itself. Anything already set up exits straight away.
 sudo systemctl enable --now inkycal-provisioning.service
 
 echo
 echo "== Done =="
-echo "The agent is now advertising over Bluetooth ('InkyCal-Setup') and,"
-echo "once on WiFi, over mDNS (_inkycal._tcp)."
+echo "The agent only runs in setup mode: for 10 minutes after you press"
+echo "button C, or by itself while this InkyCal has no Google token or WiFi"
+echo "network yet. Setup mode puts a one-time setup code on the screen; the"
+echo "companion app asks for it, and nothing over Bluetooth ('InkyCal-Setup')"
+echo "or WiFi (mDNS _inkycal._tcp) is accepted without it."
 echo
 echo "Check it:"
 echo "  systemctl status inkycal-provisioning.service"

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import pwd
+import re
 import shutil
 import subprocess
 import sys
@@ -37,6 +38,16 @@ pytestmark = pytest.mark.skipif(
 STUB_SYSTEMCTL = """#!/bin/sh
 echo "$*" >> "$(dirname "$0")/systemctl.log"
 [ "$1" = "is-active" ] && exit 3
+exit 0
+"""
+
+# The same, but with a provisioning agent running.
+STUB_SYSTEMCTL_AGENT_RUNNING = """#!/bin/sh
+echo "$*" >> "$(dirname "$0")/systemctl.log"
+if [ "$1" = "is-active" ]; then
+  case "$*" in *inkycal-provisioning.service*) exit 0 ;; esac
+  exit 3
+fi
 exit 0
 """
 
@@ -67,12 +78,13 @@ class Device:
         _git(self.seed, "push", "-q", "origin", "main")
         return _git(self.seed, "rev-parse", "HEAD")
 
-    def run_updater(self) -> subprocess.CompletedProcess:
+    def run_updater(self, **extra_env: str) -> subprocess.CompletedProcess:
         # What systemd hands inkycal-update.service: a PATH and little else. No HOME.
         env = {
             "PATH": f"{self.bin}{os.pathsep}{os.environ.get('PATH', '/usr/bin:/bin')}",
             "APP_DIR": str(self.app),
             "STATE_DIR": str(self.state),
+            **extra_env,
         }
         return subprocess.run(
             ["bash", str(OTA_SH)], env=env, capture_output=True, text=True, timeout=120
@@ -204,3 +216,39 @@ def test_git_runs_as_the_checkout_owner(device_owned_by_nobody):
     assert applied.returncode == 0, applied.stdout + applied.stderr
     assert _git(dev.app, "rev-parse", "HEAD", user="nobody") == new
     assert _owned_by_root(dev.app, skip=("venv",)) == []
+
+
+@pytest.mark.parametrize(
+    "in_session, restarted",
+    [
+        pytest.param(False, True, id="always-on-agent"),
+        pytest.param(True, False, id="setup-session"),
+    ],
+)
+def test_an_update_never_cuts_a_setup_session_short(tmp_path, in_session, restarted):
+    """The agent only runs in setup mode and picks up new code next time, so a
+    running session is left alone. A running agent with no session is the
+    always-on kind from before setup mode -- restarting it is what moves it
+    onto setup mode, so it stops listening."""
+    dev = _make_device(tmp_path)
+    (dev.bin / "systemctl").write_text(STUB_SYSTEMCTL_AGENT_RUNNING, encoding="utf-8")
+    marker = tmp_path / "run" / "setup-mode.json"
+    if in_session:
+        marker.parent.mkdir()
+        marker.write_text("{}", encoding="utf-8")
+    dev.push("v2")
+
+    result = dev.run_updater(SETUP_MARKER=str(marker))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert ("restart inkycal-provisioning.service" in dev.systemctl_calls()) is restarted
+
+
+def test_the_updater_looks_for_the_setup_marker_where_the_agent_writes_it():
+    from inkycal import setupmode
+
+    python_default = re.search(r'"INKYCAL_SETUP_MARKER", "([^"]+)"', Path(setupmode.__file__).read_text())
+    shell_default = re.search(r'SETUP_MARKER="\$\{SETUP_MARKER:-([^}]+)\}"', OTA_SH.read_text())
+
+    assert python_default and shell_default
+    assert shell_default.group(1) == python_default.group(1)

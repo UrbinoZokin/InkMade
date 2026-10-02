@@ -6,18 +6,19 @@ from typing import Optional
 import requests
 
 from .discovery import PiDevice
+from .protocol import CODE_HEADER
 
 
 class PiClient:
-    def __init__(self, device: PiDevice, pairing_token: str = "", timeout: float = 15.0):
+    def __init__(self, device: PiDevice, setup_code: str = "", timeout: float = 15.0):
         self.device = device
-        self.pairing_token = pairing_token
+        self.setup_code = setup_code
         self.timeout = timeout
 
     def _headers(self) -> dict:
         headers = {}
-        if self.pairing_token:
-            headers["X-Pairing-Token"] = self.pairing_token
+        if self.setup_code:
+            headers[CODE_HEADER] = self.setup_code
         return headers
 
     def info(self) -> dict:

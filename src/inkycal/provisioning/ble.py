@@ -1,10 +1,15 @@
 """BLE GATT peripheral used for first-time WiFi provisioning.
 
 When the Pi has no WiFi yet, the companion app talks to it over Bluetooth
-Low Energy. The app writes the SSID and passphrase, then writes "connect"
-to the command characteristic. We join the network with nmcli and publish
-the result (including the new IP) on the status characteristic so the app
-can switch over to the faster WiFi/HTTP path.
+Low Energy. The app writes the SSID and passphrase and the setup code shown
+on the panel, then writes "connect" to the command characteristic. We join
+the network with nmcli and publish the result (including the new IP) on the
+status characteristic so the app can switch over to the faster WiFi/HTTP
+path. A connect without the right code is refused, and counts as a guess
+against the setup session (see session.py).
+
+Only advertised while setup mode is on: the agent that runs this exits when
+the session ends, and BlueZ drops the advertisement with it.
 
 Implemented with ``bluezero`` (BlueZ over D-Bus). bluezero is Linux-only,
 which is exactly where this runs (the Pi). The module degrades gracefully:
@@ -26,12 +31,14 @@ from .protocol import (
     BLE_CHAR_COMMAND_UUID,
     BLE_CHAR_STATUS_UUID,
     BLE_CHAR_INFO_UUID,
+    BLE_CHAR_CODE_UUID,
     CMD_CONNECT,
     STATUS_IDLE,
     STATUS_CONNECTING,
     STATUS_CONNECTED,
     STATUS_FAILED,
 )
+from .session import OK, SetupSession, refusal
 
 
 def _encode(text: str) -> list[int]:
@@ -48,10 +55,12 @@ def _decode(value) -> str:
 class BleProvisioner:
     """GATT peripheral that accepts WiFi credentials and applies them."""
 
-    def __init__(self, info_provider: Callable[[], dict]) -> None:
+    def __init__(self, info_provider: Callable[[], dict], session: SetupSession) -> None:
         self._info_provider = info_provider
+        self._session = session
         self._ssid = ""
         self._psk = ""
+        self._code = ""
         self._state = STATUS_IDLE
         self._message = ""
         self._peripheral = None
@@ -66,10 +75,22 @@ class BleProvisioner:
         self._psk = _decode(value)
         print(f"[ble] received passphrase ({len(self._psk)} chars)")
 
+    def _on_write_code(self, value, options) -> None:
+        self._code = _decode(value)
+        print("[ble] received setup code")
+
     def _on_write_command(self, value, options) -> None:
         cmd = _decode(value).lower()
         print(f"[ble] command: {cmd}")
         if cmd == CMD_CONNECT:
+            # Each connect spends the code written before it, so a second try
+            # has to send the code again -- and is counted again if it's wrong.
+            code, self._code = self._code, ""
+            verdict = self._session.check(code)
+            if verdict != OK:
+                print(f"[ble] connect refused: setup code {verdict}")
+                self._set_state(STATUS_FAILED, refusal(verdict, self._session))
+                return
             # Run the (blocking) nmcli join off the D-Bus callback thread.
             threading.Thread(target=self._do_connect, daemon=True).start()
 
@@ -180,6 +201,13 @@ class BleProvisioner:
                 srv_id=1, chr_id=5, uuid=BLE_CHAR_INFO_UUID,
                 value=[], notifying=False, flags=["read"],
                 read_callback=self._read_info,
+            )
+            # Write-only: a code that could be read back would be handing it
+            # out to anyone in range.
+            self._peripheral.add_characteristic(
+                srv_id=1, chr_id=6, uuid=BLE_CHAR_CODE_UUID,
+                value=[], notifying=False, flags=["write"],
+                write_callback=self._on_write_code,
             )
         except Exception as exc:
             print(f"[ble] failed to build GATT peripheral: {exc}")

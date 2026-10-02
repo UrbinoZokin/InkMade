@@ -29,6 +29,8 @@ PY="$VENV_DIR/bin/python"
 PIP="$VENV_DIR/bin/pip"
 STATE_DIR="${STATE_DIR:-/var/lib/inkycal}"
 FORCE_UPDATE_FLAG="$STATE_DIR/force_update"
+# Present while a setup session runs (see src/inkycal/setupmode.py).
+SETUP_MARKER="${SETUP_MARKER:-/run/inkycal/setup-mode.json}"
 
 log() { echo "[ota-update] $*"; }
 
@@ -246,9 +248,13 @@ if printf '%s\n' "$CHANGED" | grep -q '^systemd/'; then
   systemctl enable --now inkycal-buttons.service >/dev/null 2>&1 || true
 fi
 
-# Restart the long-running provisioning agent so it picks up new code.
-if systemctl is-active --quiet inkycal-provisioning.service; then
-  log "Restarting provisioning agent..."
+# The provisioning agent only runs while setup mode is on, and starts on the
+# new code next time, so a running setup session is left to finish -- a
+# restart would cut it short. An agent running *without* a session predates
+# setup mode and listens all the time; restarting it puts it on this code,
+# which stops listening unless the device still needs setting up.
+if systemctl is-active --quiet inkycal-provisioning.service && [ ! -e "$SETUP_MARKER" ]; then
+  log "Restarting the always-on provisioning agent so it switches to setup mode..."
   systemctl restart inkycal-provisioning.service || true
 fi
 

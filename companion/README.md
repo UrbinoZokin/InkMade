@@ -7,8 +7,14 @@ events show up on the display. No keyboard or monitor on the Pi required.
 
 ## What it does
 
+0. **You press button C on the InkyCal.** That turns on *setup mode* for 10
+   minutes, and the screen shows a one-time **setup code**. The InkyCal only
+   listens for the app while setup mode is on, and refuses anything that
+   doesn't carry that code. (One that has no WiFi or Google token yet starts
+   in setup mode by itself.)
 1. **Finds your InkyCal.** It looks on your WiFi first (via mDNS). If the Pi
-   isn't online yet, it falls back to **Bluetooth**.
+   isn't online yet, it falls back to **Bluetooth**. You type in the setup
+   code.
 2. **Sets up WiFi over Bluetooth** (only if needed). You type your home WiFi
    name and password; the app sends them to the Pi over BLE, the Pi joins the
    network, and the app switches to the faster WiFi connection.
@@ -59,12 +65,12 @@ access in the browser, and the token grants **read-only** calendar access.
 ## CLI usage
 
 ```bash
-# Pi already on WiFi (discovered automatically):
+# Pi already on WiFi (discovered automatically). Asks for the setup code:
 inkycal-companion --cli --credentials client_secret.json
 
 # Pi offline — set up WiFi over Bluetooth in one shot:
 inkycal-companion --cli --credentials client_secret.json \
-  --ssid "MyHomeWiFi" --psk "wifi-password"
+  --ssid "MyHomeWiFi" --psk "wifi-password" --setup-code 482913
 
 # Skip discovery and target a known IP:
 inkycal-companion --cli --credentials client_secret.json --host 192.168.1.50
@@ -78,7 +84,18 @@ inkycal-companion --cli --credentials client_secret.json --host 192.168.1.50
   same network/subnet.
 - If discovery is blocked by your network, use `--host <pi-ip>`.
 
-## Pairing token (optional)
+## Setup code
 
-If the Pi sets `INKYCAL_PAIR_TOKEN` in its `.env`, pass the same value with
-`--pairing-token` (CLI) so the token upload is authorized.
+Every change the app makes — WiFi over Bluetooth, WiFi or the Google token over
+the network — has to carry the 6-digit code on the InkyCal's screen. The GUI
+asks for it in step 1; the CLI takes `--setup-code` (or asks). It is good for
+one setup session: 10 minutes after the last press of button C, until the
+Google token is delivered, or until 5 wrong codes have been tried, whichever
+comes first. After that, press C again for a new code.
+
+If the app can't find the InkyCal, check that its screen shows a setup code —
+outside setup mode it isn't listening at all.
+
+`INKYCAL_PAIR_TOKEN` (a fixed token in the Pi's `.env`) is no longer used; the
+code on the screen replaces it. `--pairing-token` still works as another name
+for `--setup-code`.

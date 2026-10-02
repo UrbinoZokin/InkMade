@@ -30,6 +30,7 @@ from zoneinfo import ZoneInfo
 from .config import CONFIG_PATH_DEFAULT, load_config
 from .display_inky import show_on_inky
 from .frames import is_fresh, load_frame
+from .setupmode import SetupModeActive
 from .state import STATE_PATH_DEFAULT, load_state, save_state, toggle_view_mode
 
 # Exit status for "no fresh saved frame, nothing touched", so the button
@@ -57,7 +58,11 @@ def show_other_view(config_path: str, state_path: str) -> bool:
         return False
 
     print(f"Showing the {target} frame saved at {info.rendered_at.astimezone(tz):%H:%M}")
-    show_on_inky(img, rotate_degrees=cfg.display.rotate_degrees, border=cfg.display.border)
+    try:
+        show_on_inky(img, rotate_degrees=cfg.display.rotate_degrees, border=cfg.display.border)
+    except SetupModeActive:
+        print("Setup mode is showing its code on the panel; not switching views")
+        return False
 
     # Re-read rather than reuse the state loaded above: the panel can be busy
     # for minutes with another render, which saves its own changes meanwhile.

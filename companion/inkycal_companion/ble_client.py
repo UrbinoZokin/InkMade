@@ -19,6 +19,7 @@ from .protocol import (
     BLE_CHAR_COMMAND_UUID,
     BLE_CHAR_STATUS_UUID,
     BLE_CHAR_INFO_UUID,
+    BLE_CHAR_CODE_UUID,
     CMD_CONNECT,
     STATUS_CONNECTED,
     STATUS_FAILED,
@@ -69,11 +70,14 @@ async def provision_wifi(
     address: str,
     ssid: str,
     psk: str,
+    setup_code: str,
     connect_timeout: float = 60.0,
 ) -> dict:
     """Send WiFi credentials over BLE and wait for the Pi to join.
 
-    Returns the final status dict reported by the Pi (includes its new IP).
+    `setup_code` is the one-time code on the InkyCal's screen; the Pi refuses
+    to connect without it. Returns the final status dict reported by the Pi
+    (includes its new IP).
     """
     try:
         from bleak import BleakClient
@@ -86,6 +90,10 @@ async def provision_wifi(
 
         await client.write_gatt_char(BLE_CHAR_SSID_UUID, ssid.encode("utf-8"), response=True)
         await client.write_gatt_char(BLE_CHAR_PSK_UUID, psk.encode("utf-8"), response=True)
+        # An InkyCal from before setup mode has no code characteristic and
+        # asks for no code; anything newer refuses to connect without it.
+        if client.services.get_characteristic(BLE_CHAR_CODE_UUID) is not None:
+            await client.write_gatt_char(BLE_CHAR_CODE_UUID, setup_code.encode("utf-8"), response=True)
 
         # Subscribe to status notifications before issuing the connect command.
         final: dict = {}

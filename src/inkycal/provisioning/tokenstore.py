@@ -1,14 +1,14 @@
 """Persist the Google OAuth token delivered by the companion app.
 
 The display program reads ``GOOGLE_TOKEN_JSON`` (see ``calendar_google.py``).
-This module validates an uploaded token blob, writes it atomically to that
-path and nudges the display service to refresh.
+This module validates an uploaded token blob and writes it atomically to that
+path. The delivery ends setup mode, and the agent's repaint on the way out is
+the first render to use it.
 """
 from __future__ import annotations
 
 import json
 import os
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -85,26 +85,3 @@ def save_token(raw: bytes | str, path: Optional[str] = None) -> str:
     except (OSError, AttributeError):
         pass
     return dest
-
-
-def refresh_display() -> bool:
-    """Best-effort: kick the display service so the new token is used now.
-
-    Uses ``--no-block`` because inkycal.service is Type=oneshot with a long
-    ExecStartPre; without it ``systemctl start`` would block until the render
-    finishes (45s+) and hang the HTTP request that triggered this. Never
-    raises — a failed start just means the next scheduled poll picks it up.
-    """
-    for cmd in (
-        ["systemctl", "start", "--no-block", "inkycal.service"],
-        ["sudo", "systemctl", "start", "--no-block", "inkycal.service"],
-    ):
-        try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=10, check=False
-            )
-        except (OSError, subprocess.SubprocessError):
-            continue
-        if proc.returncode == 0:
-            return True
-    return False

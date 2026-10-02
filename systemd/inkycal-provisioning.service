@@ -1,7 +1,13 @@
 [Unit]
-Description=InkyCal provisioning agent (WiFi setup over BLE + Google token over WiFi)
+Description=InkyCal setup mode (button C): WiFi over Bluetooth + Google token over WiFi
 After=network.target bluetooth.target
 Wants=network.target
+
+# Not a long-running service. Started at boot, it exits straight away unless
+# the device still has no Google token or WiFi network; button C starts it on
+# demand. While it runs, the panel shows a one-time setup code that every
+# change over Bluetooth or the network has to carry, and it stops listening
+# after 10 minutes, or as soon as the Google token arrives.
 
 [Service]
 Type=simple

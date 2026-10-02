@@ -1,7 +1,7 @@
 """Shared constants for the InkyCal provisioning protocol.
 
 The companion app (companion/inkycal_companion/protocol.py) MUST keep the
-UUIDs, service type and port below in sync with this file. They are
+UUIDs, service type, port and header below in sync with this file. They are
 duplicated rather than imported because the two halves are deployed to
 different machines (Pi vs laptop).
 """
@@ -24,6 +24,14 @@ BLE_CHAR_PSK_UUID = "f0a40002-3c5a-4b9e-9b7a-1e2d3c4b5a60"    # write
 BLE_CHAR_COMMAND_UUID = "f0a40003-3c5a-4b9e-9b7a-1e2d3c4b5a60"  # write ("connect")
 BLE_CHAR_STATUS_UUID = "f0a40004-3c5a-4b9e-9b7a-1e2d3c4b5a60"   # read / notify (JSON)
 BLE_CHAR_INFO_UUID = "f0a40005-3c5a-4b9e-9b7a-1e2d3c4b5a60"     # read (JSON)
+BLE_CHAR_CODE_UUID = "f0a40006-3c5a-4b9e-9b7a-1e2d3c4b5a60"     # write: setup code from the panel
+
+# --- Setup code ---
+# Every change, over either transport, has to carry the one-time code the
+# panel shows while setup mode is on. Over HTTP it goes in this header, named
+# for the static pairing token it replaced so older companion builds' CLI
+# (--pairing-token) can still send it.
+CODE_HEADER = "X-Pairing-Token"
 
 # Command tokens written to the command characteristic.
 CMD_CONNECT = "connect"
