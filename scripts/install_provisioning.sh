@@ -14,16 +14,18 @@ if [ ! -d "$APP_DIR" ]; then
   exit 1
 fi
 
-# Bluetooth/D-Bus/GLib + zeroconf, all as prebuilt system packages. This is
-# important on a Pi: installing zeroconf from PyPI tries to COMPILE its Cython
-# C-extensions, which can hang or run out of RAM on a Pi Zero 2 W. The apt
-# package ships a prebuilt binary, so we use that and expose it to the venv.
-echo "-- Installing Bluetooth + D-Bus + zeroconf system packages..."
+# Bluetooth/D-Bus/GLib, zeroconf and cryptography, all as prebuilt system
+# packages. This is important on a Pi: installing zeroconf from PyPI tries to
+# COMPILE its Cython C-extensions, which can hang or run out of RAM on a Pi
+# Zero 2 W, and cryptography is Rust. The apt packages ship prebuilt binaries,
+# so we use those and expose them to the venv.
+echo "-- Installing Bluetooth + D-Bus + zeroconf + cryptography system packages..."
 sudo apt-get update
 sudo apt-get install -y \
   bluetooth bluez \
   python3-dbus python3-gi \
   python3-zeroconf \
+  python3-cryptography \
   network-manager
 
 # Let the venv use the system dbus/gi/zeroconf bindings (no compiling needed).
@@ -36,20 +38,22 @@ if [ -d "$VENV_DIR" ]; then
   fi
 fi
 
-# Only bluezero needs pip, and it is pure Python (no compilation). --prefer-binary
-# guards against any source builds creeping in.
-echo "-- Installing bluezero into venv..."
-"$VENV_DIR/bin/pip" install --prefer-binary bluezero
+# Only bluezero and spake2 need pip, and both are pure Python (no compilation).
+# --no-deps leaves everything they depend on to the apt packages above, and
+# --prefer-binary guards against any source builds creeping in.
+echo "-- Installing bluezero + spake2 into venv..."
+"$VENV_DIR/bin/pip" install --prefer-binary --no-deps -r "$APP_DIR/requirements-provisioning.txt"
 
 # Fail fast with a clear message if the agent's imports are not satisfied.
 echo "-- Verifying provisioning imports..."
-if ! "$VENV_DIR/bin/python" -c "import zeroconf, bluezero, dbus, gi" 2>/dev/null; then
+if ! "$VENV_DIR/bin/python" -c "import zeroconf, bluezero, dbus, gi, spake2, cryptography" 2>/dev/null; then
   echo "✗ Provisioning imports failed. Check that python3-zeroconf/python3-dbus/"
-  echo "  python3-gi installed and that $SITE_PACKAGES/system-site.pth exists."
-  "$VENV_DIR/bin/python" -c "import zeroconf, bluezero, dbus, gi" || true
+  echo "  python3-gi/python3-cryptography installed and that"
+  echo "  $SITE_PACKAGES/system-site.pth exists."
+  "$VENV_DIR/bin/python" -c "import zeroconf, bluezero, dbus, gi, spake2, cryptography" || true
   exit 1
 fi
-echo "✓ zeroconf, bluezero, dbus, gi all import"
+echo "✓ zeroconf, bluezero, dbus, gi, spake2, cryptography all import"
 
 echo "-- Making BlueZ advertise/peripheral capable..."
 sudo systemctl enable --now bluetooth || true
@@ -61,12 +65,18 @@ sudo bluetoothctl power on || true
 echo "-- Installing systemd unit..."
 sudo cp "$APP_DIR/systemd/inkycal-provisioning.service" /etc/systemd/system/
 sudo systemctl daemon-reload
+# Enabled so a device that still has no Google token or WiFi network comes up
+# in setup mode by itself. Anything already set up exits straight away.
 sudo systemctl enable --now inkycal-provisioning.service
 
 echo
 echo "== Done =="
-echo "The agent is now advertising over Bluetooth ('InkyCal-Setup') and,"
-echo "once on WiFi, over mDNS (_inkycal._tcp)."
+echo "The agent only runs in setup mode: for 10 minutes after you press"
+echo "button C, or by itself while this InkyCal has no Google token or WiFi"
+echo "network yet. Setup mode puts a one-time setup code on the screen; the"
+echo "companion app asks for it, and everything it sends over Bluetooth"
+echo "('InkyCal-Setup') or WiFi (mDNS _inkycal._tcp) is encrypted with a key"
+echo "only that code produces."
 echo
 echo "Check it:"
 echo "  systemctl status inkycal-provisioning.service"

@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import os
 import pwd
+import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -37,6 +39,16 @@ pytestmark = pytest.mark.skipif(
 STUB_SYSTEMCTL = """#!/bin/sh
 echo "$*" >> "$(dirname "$0")/systemctl.log"
 [ "$1" = "is-active" ] && exit 3
+exit 0
+"""
+
+# The same, but with a provisioning agent running.
+STUB_SYSTEMCTL_AGENT_RUNNING = """#!/bin/sh
+echo "$*" >> "$(dirname "$0")/systemctl.log"
+if [ "$1" = "is-active" ]; then
+  case "$*" in *inkycal-provisioning.service*) exit 0 ;; esac
+  exit 3
+fi
 exit 0
 """
 
@@ -67,12 +79,13 @@ class Device:
         _git(self.seed, "push", "-q", "origin", "main")
         return _git(self.seed, "rev-parse", "HEAD")
 
-    def run_updater(self) -> subprocess.CompletedProcess:
+    def run_updater(self, **extra_env: str) -> subprocess.CompletedProcess:
         # What systemd hands inkycal-update.service: a PATH and little else. No HOME.
         env = {
             "PATH": f"{self.bin}{os.pathsep}{os.environ.get('PATH', '/usr/bin:/bin')}",
             "APP_DIR": str(self.app),
             "STATE_DIR": str(self.state),
+            **extra_env,
         }
         return subprocess.run(
             ["bash", str(OTA_SH)], env=env, capture_output=True, text=True, timeout=120
@@ -204,3 +217,131 @@ def test_git_runs_as_the_checkout_owner(device_owned_by_nobody):
     assert applied.returncode == 0, applied.stdout + applied.stderr
     assert _git(dev.app, "rev-parse", "HEAD", user="nobody") == new
     assert _owned_by_root(dev.app, skip=("venv",)) == []
+
+
+@pytest.mark.parametrize(
+    "in_session, restarted",
+    [
+        pytest.param(False, True, id="always-on-agent"),
+        pytest.param(True, False, id="setup-session"),
+    ],
+)
+def test_an_update_never_cuts_a_setup_session_short(tmp_path, in_session, restarted):
+    """The agent only runs in setup mode and picks up new code next time, so a
+    running session is left alone. A running agent with no session is the
+    always-on kind from before setup mode -- restarting it is what moves it
+    onto setup mode, so it stops listening."""
+    dev = _make_device(tmp_path)
+    (dev.bin / "systemctl").write_text(STUB_SYSTEMCTL_AGENT_RUNNING, encoding="utf-8")
+    marker = tmp_path / "run" / "setup-mode.json"
+    if in_session:
+        marker.parent.mkdir()
+        marker.write_text("{}", encoding="utf-8")
+    dev.push("v2")
+
+    result = dev.run_updater(SETUP_MARKER=str(marker))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert ("restart inkycal-provisioning.service" in dev.systemctl_calls()) is restarted
+
+
+def test_the_updater_looks_for_the_setup_marker_where_the_agent_writes_it():
+    from inkycal import setupmode
+
+    python_default = re.search(r'"INKYCAL_SETUP_MARKER", "([^"]+)"', Path(setupmode.__file__).read_text())
+    shell_default = re.search(r'SETUP_MARKER="\$\{SETUP_MARKER:-([^}]+)\}"', OTA_SH.read_text())
+
+    assert python_default and shell_default
+    assert shell_default.group(1) == python_default.group(1)
+
+
+def _mode(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+def test_the_updater_makes_the_secrets_private(tmp_path):
+    """.env holds the iCloud password and secrets/ the Google token; the state
+    directory keeps pictures of the schedule. Installs from before this was
+    enforced left all of them readable by every account on the Pi."""
+    dev = _make_device(tmp_path)
+    env = dev.app / ".env"
+    env.write_text('ICLOUD_APP_PASSWORD="abcd-efgh-ijkl-mnop"\n', encoding="utf-8")
+    env.chmod(0o644)
+    secrets = dev.app / "secrets"
+    secrets.mkdir(mode=0o755)
+    token = secrets / "google_token.json"
+    token.write_text("{}", encoding="utf-8")
+    token.chmod(0o644)
+    dev.state.chmod(0o755)
+
+    result = dev.run_updater()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _mode(env) == 0o600
+    assert _mode(secrets) == 0o700
+    assert _mode(token) == 0o600
+    assert _mode(dev.state) == 0o700
+
+
+def test_the_updater_only_locks_down_what_the_app_user_owns(device_owned_by_nobody):
+    """Making private something the app's user doesn't own would lock the
+    render out of it -- a calendar that stops, to keep a secret from itself."""
+    dev = device_owned_by_nobody
+    env = dev.app / ".env"
+    env.write_text('ICLOUD_APP_PASSWORD="abcd-efgh-ijkl-mnop"\n', encoding="utf-8")
+    env.chmod(0o644)
+    _run("chown", "-R", "nobody:", str(dev.root))
+    os.chown(dev.state, 0, 0)
+    dev.state.chmod(0o755)
+
+    result = dev.run_updater()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _mode(env) == 0o600
+    assert _mode(dev.state) == 0o755, "root's directory: not the updater's to make private"
+
+
+# The provisioning installer, standing in for the real one (which runs apt).
+STUB_PROVISIONING_INSTALLER = """#!/bin/sh
+touch "$(dirname "$0")/../../provisioning-installer-ran"
+"""
+
+STUB_SYSTEMCTL_NO_AGENT = """#!/bin/sh
+echo "$*" >> "$(dirname "$0")/systemctl.log"
+[ "$1" = "is-active" ] && exit 3
+[ "$1" = "is-enabled" ] && exit 1
+exit 0
+"""
+
+
+def _push_files(dev: Device, files: dict, message: str) -> None:
+    for name, text in files.items():
+        path = dev.seed / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    _git(dev.seed, "add", "-A")
+    _git(dev.seed, "commit", "-qm", message)
+    _git(dev.seed, "push", "-q", "origin", "main")
+
+
+@pytest.mark.parametrize("agent_installed", [True, False], ids=["agent-installed", "no-agent"])
+def test_new_setup_agent_dependencies_are_installed_where_the_agent_is(tmp_path, agent_installed):
+    """They come from apt, through the provisioning installer, not from
+    requirements.txt -- so without this a device would update into a setup
+    agent it can't start."""
+    dev = _make_device(tmp_path)
+    if not agent_installed:
+        (dev.bin / "systemctl").write_text(STUB_SYSTEMCTL_NO_AGENT, encoding="utf-8")
+    _push_files(
+        dev,
+        {
+            "scripts/install_provisioning.sh": STUB_PROVISIONING_INSTALLER,
+            "requirements-provisioning.txt": "spake2==0.9\n",
+        },
+        "needs spake2",
+    )
+
+    result = dev.run_updater()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (dev.root / "provisioning-installer-ran").exists() is agent_installed

@@ -8,6 +8,7 @@ import pytest
 from PIL import Image
 
 from inkycal import frames, viewswap
+from inkycal.setupmode import SetupModeActive
 from inkycal.state import State, load_state, save_state
 
 TZ = ZoneInfo("America/Phoenix")
@@ -132,3 +133,20 @@ def test_entrypoint_exits_cleanly_after_switching(tmp_path, panel, monkeypatch):
     viewswap.main()  # no SystemExit: status 0
 
     assert len(panel) == 1
+
+
+def test_leaves_everything_alone_while_setup_mode_holds_the_panel(tmp_path, monkeypatch):
+    """The button handler ends setup mode before switching views, so this is
+    only the race where setup mode starts as a switch begins. The panel keeps
+    the setup code and state.json keeps naming the view that was up before."""
+    state_path = _state(tmp_path)
+    _save_weekly(state_path)
+    before = load_state(state_path)
+
+    def setup_screen_up(_img, **_kw):
+        raise SetupModeActive("setup mode is showing its code on the panel")
+
+    monkeypatch.setattr(viewswap, "show_on_inky", setup_screen_up)
+
+    assert viewswap.show_other_view(_config(tmp_path), state_path) is False
+    assert load_state(state_path) == before

@@ -29,6 +29,8 @@ PY="$VENV_DIR/bin/python"
 PIP="$VENV_DIR/bin/pip"
 STATE_DIR="${STATE_DIR:-/var/lib/inkycal}"
 FORCE_UPDATE_FLAG="$STATE_DIR/force_update"
+# Present while a setup session runs (see src/inkycal/setupmode.py).
+SETUP_MARKER="${SETUP_MARKER:-/run/inkycal/setup-mode.json}"
 
 log() { echo "[ota-update] $*"; }
 
@@ -164,6 +166,25 @@ if [ "$RUN_AS_OWNER" = true ]; then
     || log "Could not hand every file in $APP_DIR back to $OWNER; continuing."
 fi
 
+# The calendar passwords in .env, the Google token in secrets/ and the state
+# directory -- whose saved frames are pictures of the schedule -- are for the
+# app's user alone. Installs from before that was enforced left all three
+# readable by every account on the Pi. Only what that user owns is touched:
+# making private a file it doesn't own would lock the render out of it.
+lock_down() {
+  local mode="$1" path="$2"
+  if [ -e "$path" ] && [ "$(stat -c '%U' "$path")" = "$OWNER" ]; then
+    chmod "$mode" "$path" || log "Could not make $path private; continuing."
+  fi
+}
+lock_down 600 "$APP_DIR/.env"
+lock_down 700 "$APP_DIR/secrets"
+if [ -d "$APP_DIR/secrets" ]; then
+  find "$APP_DIR/secrets" -type f -user "$OWNER" -exec chmod 600 {} + \
+    || log "Could not make everything in $APP_DIR/secrets private; continuing."
+fi
+lock_down 700 "$STATE_DIR"
+
 # Fetch with a few retries; the Pi's network (or GitHub) can be briefly flaky.
 fetched=0
 delay=2
@@ -223,6 +244,16 @@ if printf '%s\n' "$CHANGED" | grep -qx 'pyproject.toml'; then
   log "pyproject.toml changed; refreshing package install..."
   "$PIP" install -e "$APP_DIR"
 fi
+# The setup agent's dependencies come from scripts/install_provisioning.sh,
+# not from requirements.txt -- the compiled ones from apt, prebuilt, rather
+# than built on the Pi. On a device that has the agent, rerun it when they
+# change; anywhere else they aren't needed.
+if printf '%s\n' "$CHANGED" | grep -qx 'requirements-provisioning.txt' \
+  && systemctl is-enabled --quiet inkycal-provisioning.service 2>/dev/null; then
+  log "requirements-provisioning.txt changed; reinstalling the setup agent's dependencies..."
+  "$APP_DIR/scripts/install_provisioning.sh" \
+    || log "Could not install them; setup mode stays off until scripts/install_provisioning.sh succeeds."
+fi
 
 if printf '%s\n' "$CHANGED" | grep -q '^systemd/'; then
   log "systemd units changed; reinstalling..."
@@ -246,9 +277,13 @@ if printf '%s\n' "$CHANGED" | grep -q '^systemd/'; then
   systemctl enable --now inkycal-buttons.service >/dev/null 2>&1 || true
 fi
 
-# Restart the long-running provisioning agent so it picks up new code.
-if systemctl is-active --quiet inkycal-provisioning.service; then
-  log "Restarting provisioning agent..."
+# The provisioning agent only runs while setup mode is on, and starts on the
+# new code next time, so a running setup session is left to finish -- a
+# restart would cut it short. An agent running *without* a session predates
+# setup mode and listens all the time; restarting it puts it on this code,
+# which stops listening unless the device still needs setting up.
+if systemctl is-active --quiet inkycal-provisioning.service && [ ! -e "$SETUP_MARKER" ]; then
+  log "Restarting the always-on provisioning agent so it switches to setup mode..."
   systemctl restart inkycal-provisioning.service || true
 fi
 

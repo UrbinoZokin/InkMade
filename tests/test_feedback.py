@@ -4,6 +4,7 @@ import pytest
 from PIL import Image
 
 from inkycal import feedback, frames
+from inkycal.setupmode import SetupModeActive
 from inkycal.state import State, load_state, save_state
 
 
@@ -149,3 +150,17 @@ def test_show_notice_passes_the_display_settings_through(tmp_path, monkeypatch):
     feedback.show_notice("Refreshing...", str(cfg_path), str(tmp_path / "state.json"))
 
     assert shown[0] == {"rotate_degrees": 90, "border": "black"}
+
+
+def test_show_notice_leaves_the_setup_code_alone(tmp_path, monkeypatch):
+    """No "please wait" over the setup code. The hash stays as it is: the setup
+    screen already cleared it when it went up."""
+    def setup_screen_up(_img, **_kw):
+        raise SetupModeActive("setup mode is showing its code on the panel")
+
+    monkeypatch.setattr(feedback, "show_on_inky", setup_screen_up)
+    state_path = str(tmp_path / "state.json")
+    save_state(state_path, State(last_hash="content-hash"))
+
+    assert feedback.show_notice("Refreshing...", _config(tmp_path, "wipe"), state_path) is False
+    assert load_state(state_path).last_hash == "content-hash"

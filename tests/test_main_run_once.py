@@ -15,6 +15,7 @@ from PIL import Image
 
 from inkycal import main
 from inkycal.models import Event
+from inkycal.setupmode import SetupModeActive
 from inkycal.state import load_state
 
 BASE_CONFIG = """
@@ -137,3 +138,29 @@ def test_force_repaints_even_when_nothing_changed(tmp_path, panel):
     main.run_once(config_path=config_path, state_path=state_path, force=True)
 
     assert len(panel) == 2
+
+
+def test_a_render_turned_away_by_setup_mode_records_nothing(tmp_path, monkeypatch):
+    """While setup mode shows its code, a render can't reach the panel. It must
+    not record content it never painted -- that would make the first run after
+    setup mode ends skip the panel and leave the dead code up."""
+    monkeypatch.setattr(main, "WeatherForecastResolver", _NoWeather)
+    monkeypatch.setattr(main, "render_daily_schedule", lambda **_kw: Image.new("RGB", (60, 80), "white"))
+    shown = []
+    setup_mode = [True]
+
+    def panel(img, **_kw):
+        if setup_mode[0]:
+            raise SetupModeActive("setup mode is showing its code on the panel")
+        shown.append(img)
+
+    monkeypatch.setattr(main, "show_on_inky", panel)
+    config_path = _config(tmp_path)
+    state_path = str(tmp_path / "state.json")
+
+    main.run_once(config_path=config_path, state_path=state_path)
+    assert load_state(state_path).last_hash == ""
+
+    setup_mode[0] = False
+    main.run_once(config_path=config_path, state_path=state_path)
+    assert len(shown) == 1

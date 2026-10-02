@@ -8,10 +8,20 @@
 #     The install script instead installs the prebuilt apt package
 #     `python3-zeroconf` and exposes it to the venv. Listed here only so the
 #     dependency is documented.
+#   * cryptography -- seals setup traffic (src/inkycal/provisioning/setupcrypto.py)
+#     and is spake2's one dependency. Rust and C under the hood, so the same
+#     story: the script installs the prebuilt `python3-cryptography`.
 #   * bluezero -- pure Python BLE GATT peripheral over BlueZ/D-Bus. Safe to pip
 #     install; the script does this with --prefer-binary.
+#   * spake2 -- pure Python key exchange keyed by the setup code on the panel.
 #   * dbus-python / PyGObject -- bluezero's runtime deps; provided by apt
 #     (python3-dbus, python3-gi), again to avoid compiling on the Pi.
 #
+# The script pip-installs this file with --no-deps, so everything compiled
+# comes from apt. A change to it reruns the script on devices that have the
+# agent (scripts/ota_update.sh).
+#
 # zeroconf      (install via: apt install python3-zeroconf)
+# cryptography  (install via: apt install python3-cryptography)
 bluezero>=0.9.0
+spake2==0.9

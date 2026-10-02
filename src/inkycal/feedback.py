@@ -40,7 +40,8 @@ from .config import CONFIG_PATH_DEFAULT, load_config
 from .display_inky import show_on_inky
 from .frames import load_frame
 from .render import _load_bold_font, _load_font, _wrap_text
-from .state import STATE_PATH_DEFAULT, load_state, save_state
+from .setupmode import SetupModeActive
+from .state import STATE_PATH_DEFAULT, invalidate_render_hash, load_state
 
 STYLE_BANNER = "banner"
 STYLE_WIPE = "wipe"
@@ -108,29 +109,6 @@ def render_notice(
     return img
 
 
-def _invalidate_render_hash(state_path: str) -> None:
-    """Force the next scheduled render to actually repaint the panel.
-
-    run_once skips the refresh when the content hash matches what's already on
-    screen -- but what's on screen is now this notice, not that content. Without
-    clearing the hash, a notice whose follow-up work never repaints (an OTA check
-    that finds nothing, a crash mid-fetch) would stay up until the content itself
-    happened to change.
-    """
-    try:
-        state = load_state(state_path)
-    except (OSError, ValueError) as e:
-        print(f"Could not clear render hash at {state_path}: {e}")
-        return
-    if not state.last_hash:
-        return
-    state.last_hash = ""
-    try:
-        save_state(state_path, state)
-    except OSError as e:
-        print(f"Could not clear render hash at {state_path}: {e}")
-
-
 def resolve_style(configured: str, requested: Optional[str] = None) -> str:
     style = (requested or configured or STYLE_BANNER).strip().lower()
     return style if style in VALID_STYLES else STYLE_BANNER
@@ -156,8 +134,13 @@ def show_notice(
             print("No cached frame to draw the notice over; clearing the panel instead.")
 
     img = render_notice(message, cfg.display.width, cfg.display.height, base=base)
-    show_on_inky(img, rotate_degrees=cfg.display.rotate_degrees, border=cfg.display.border)
-    _invalidate_render_hash(state_path)
+    try:
+        show_on_inky(img, rotate_degrees=cfg.display.rotate_degrees, border=cfg.display.border)
+    except SetupModeActive:
+        print("Setup mode is showing its code on the panel; not showing a notice.")
+        return False
+    # What's on screen is this notice now, not the content the hash describes.
+    invalidate_render_hash(state_path)
     return True
 
 
