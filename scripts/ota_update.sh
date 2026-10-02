@@ -29,6 +29,8 @@ PY="$VENV_DIR/bin/python"
 PIP="$VENV_DIR/bin/pip"
 STATE_DIR="${STATE_DIR:-/var/lib/inkycal}"
 FORCE_UPDATE_FLAG="$STATE_DIR/force_update"
+# Present while a setup session runs (see src/inkycal/setupmode.py).
+SETUP_MARKER="${SETUP_MARKER:-/run/inkycal/setup-mode.json}"
 
 log() { echo "[ota-update] $*"; }
 
@@ -39,15 +41,23 @@ fi
 
 cd "$APP_DIR"
 
-# This service runs as root while the checkout is usually owned by the app user
-# (e.g. 'pi'). Tell git the checkout is trusted so it does not refuse with
-# "detected dubious ownership in repository". Add the entry only once.
-if ! git config --global --get-all safe.directory 2>/dev/null | grep -qx "$APP_DIR"; then
-  git config --global --add safe.directory "$APP_DIR"
-fi
-
 OWNER="$(stat -c '%U' "$APP_DIR")"
 GROUP="$(stat -c '%G' "$APP_DIR")"
+
+# This service runs as root, but git runs as the checkout's owner (e.g. 'pi'),
+# the same user the quarter-hour render runs it as. Root running git in a
+# checkout it doesn't own is refused as "dubious ownership" unless root's global
+# git config says otherwise, and systemd gives this unit no $HOME to keep that
+# config in (no User= line): every scheduled run used to die right there with
+# "fatal: $HOME not set". Root's fetches also left root-owned files in .git
+# that the render's own fetch then couldn't write to.
+if [ "$(id -u)" -eq 0 ] && [ "$OWNER" != "root" ]; then
+  RUN_AS_OWNER=true
+  git_as_owner() { runuser -u "$OWNER" -- git -C "$APP_DIR" "$@"; }
+else
+  RUN_AS_OWNER=false
+  git_as_owner() { git -C "$APP_DIR" "$@"; }
+fi
 
 # Read the settings we need from config.yaml using the venv's PyYAML, and let it
 # also decide whether we're allowed to *apply* right now. apply_window="sleep"
@@ -146,11 +156,40 @@ esac
 
 log "Checking for updates on origin/$BRANCH ..."
 
+# Anything root has left in the checkout -- earlier versions of this script ran
+# git as root, and so does a `sudo git pull` by hand -- stops the owner's git
+# from writing there. Hand it back first. Only files that need it are touched,
+# and venv/ is skipped: git never writes to it, and it's thousands of files.
+if [ "$RUN_AS_OWNER" = true ]; then
+  find "$APP_DIR" -path "$VENV_DIR" -prune -o \
+    \( ! -user "$OWNER" -o ! -group "$GROUP" \) -exec chown -h "$OWNER:$GROUP" {} + \
+    || log "Could not hand every file in $APP_DIR back to $OWNER; continuing."
+fi
+
+# The calendar passwords in .env, the Google token in secrets/ and the state
+# directory -- whose saved frames are pictures of the schedule -- are for the
+# app's user alone. Installs from before that was enforced left all three
+# readable by every account on the Pi. Only what that user owns is touched:
+# making private a file it doesn't own would lock the render out of it.
+lock_down() {
+  local mode="$1" path="$2"
+  if [ -e "$path" ] && [ "$(stat -c '%U' "$path")" = "$OWNER" ]; then
+    chmod "$mode" "$path" || log "Could not make $path private; continuing."
+  fi
+}
+lock_down 600 "$APP_DIR/.env"
+lock_down 700 "$APP_DIR/secrets"
+if [ -d "$APP_DIR/secrets" ]; then
+  find "$APP_DIR/secrets" -type f -user "$OWNER" -exec chmod 600 {} + \
+    || log "Could not make everything in $APP_DIR/secrets private; continuing."
+fi
+lock_down 700 "$STATE_DIR"
+
 # Fetch with a few retries; the Pi's network (or GitHub) can be briefly flaky.
 fetched=0
 delay=2
 for attempt in 1 2 3 4; do
-  if git fetch --quiet origin "$BRANCH"; then
+  if git_as_owner fetch --quiet origin "$BRANCH"; then
     fetched=1
     break
   fi
@@ -163,8 +202,8 @@ if [ "$fetched" -ne 1 ]; then
   exit 0
 fi
 
-LOCAL="$(git rev-parse HEAD)"
-REMOTE="$(git rev-parse "origin/$BRANCH")"
+LOCAL="$(git_as_owner rev-parse HEAD)"
+REMOTE="$(git_as_owner rev-parse "origin/$BRANCH")"
 
 if [ "$LOCAL" = "$REMOTE" ]; then
   log "Already up to date ($LOCAL)."
@@ -185,13 +224,14 @@ OLD="$LOCAL"
 # origin/main is the source of truth for a deployed device: converge to it even
 # if the local checkout somehow diverged. Tracked local edits are discarded;
 # config.yaml, .env and secrets/ are gitignored and left untouched.
-git reset --hard "origin/$BRANCH"
-NEW="$(git rev-parse HEAD)"
+git_as_owner reset --hard "origin/$BRANCH"
+NEW="$(git_as_owner rev-parse HEAD)"
 
-# Keep the checkout owned by the app user after pulling as root.
+# git ran as the app user, but pip below still runs as root. Keep the whole
+# checkout, venv/ included, owned by the app user.
 chown -R "$OWNER:$GROUP" "$APP_DIR"
 
-CHANGED="$(git diff --name-only "$OLD" "$NEW" 2>/dev/null || true)"
+CHANGED="$(git_as_owner diff --name-only "$OLD" "$NEW" 2>/dev/null || true)"
 
 # Keep helper scripts executable (mirrors install.sh).
 chmod +x "$APP_DIR"/scripts/*.sh 2>/dev/null || true
@@ -203,6 +243,16 @@ fi
 if printf '%s\n' "$CHANGED" | grep -qx 'pyproject.toml'; then
   log "pyproject.toml changed; refreshing package install..."
   "$PIP" install -e "$APP_DIR"
+fi
+# The setup agent's dependencies come from scripts/install_provisioning.sh,
+# not from requirements.txt -- the compiled ones from apt, prebuilt, rather
+# than built on the Pi. On a device that has the agent, rerun it when they
+# change; anywhere else they aren't needed.
+if printf '%s\n' "$CHANGED" | grep -qx 'requirements-provisioning.txt' \
+  && systemctl is-enabled --quiet inkycal-provisioning.service 2>/dev/null; then
+  log "requirements-provisioning.txt changed; reinstalling the setup agent's dependencies..."
+  "$APP_DIR/scripts/install_provisioning.sh" \
+    || log "Could not install them; setup mode stays off until scripts/install_provisioning.sh succeeds."
 fi
 
 if printf '%s\n' "$CHANGED" | grep -q '^systemd/'; then
@@ -227,9 +277,13 @@ if printf '%s\n' "$CHANGED" | grep -q '^systemd/'; then
   systemctl enable --now inkycal-buttons.service >/dev/null 2>&1 || true
 fi
 
-# Restart the long-running provisioning agent so it picks up new code.
-if systemctl is-active --quiet inkycal-provisioning.service; then
-  log "Restarting provisioning agent..."
+# The provisioning agent only runs while setup mode is on, and starts on the
+# new code next time, so a running setup session is left to finish -- a
+# restart would cut it short. An agent running *without* a session predates
+# setup mode and listens all the time; restarting it puts it on this code,
+# which stops listening unless the device still needs setting up.
+if systemctl is-active --quiet inkycal-provisioning.service && [ ! -e "$SETUP_MARKER" ]; then
+  log "Restarting the always-on provisioning agent so it switches to setup mode..."
   systemctl restart inkycal-provisioning.service || true
 fi
 

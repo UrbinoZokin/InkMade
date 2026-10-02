@@ -42,8 +42,13 @@ class MdnsAdvertiser:
         try:
             self._zc = Zeroconf()
             self._zc.register_service(self._info)
-        except OSError as exc:
+        except Exception as exc:  # OSError, or zeroconf's own (e.g. a name clash)
             print(f"[mdns] could not register service: {exc}")
+            if self._zc is not None:
+                try:
+                    self._zc.close()
+                except Exception:
+                    pass
             self._zc = None
             return False
         print(f"[mdns] advertising {name} at {ip}:{self.port}")
@@ -54,7 +59,7 @@ class MdnsAdvertiser:
             try:
                 self._zc.unregister_service(self._info)
                 self._zc.close()
-            except OSError:
+            except Exception:  # advertising is best effort, and so is withdrawing it
                 pass
         self._zc = None
         self._info = None

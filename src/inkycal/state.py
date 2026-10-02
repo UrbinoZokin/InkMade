@@ -81,3 +81,23 @@ def save_state(path: str, state: State) -> None:
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(asdict(state), indent=2), encoding="utf-8")
     tmp.replace(p)
+
+
+def invalidate_render_hash(path: str) -> None:
+    """Force the next scheduled render to actually repaint the panel.
+
+    run_once skips the refresh when the content hash matches what's already on
+    screen -- but what's on screen now is something else: a press notice
+    (inkycal.feedback) or the setup-mode code (inkycal.setupscreen). Without
+    clearing the hash, one whose follow-up never repaints (an OTA check that
+    finds nothing, a crash mid-fetch, a setup session that dies) would stay up
+    until the content itself happened to change.
+    """
+    state = load_state(path)
+    if not state.last_hash:
+        return
+    state.last_hash = ""
+    try:
+        save_state(path, state)
+    except OSError as e:
+        print(f"Could not clear render hash at {path}: {e}")

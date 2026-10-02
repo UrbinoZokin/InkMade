@@ -7,8 +7,13 @@ touches the display, calendar credentials, or state file directly.
 
   A (pin_view)    - switch between the daily and weekly views
   B (pin_refresh) - force a refresh
-  C (pin_unused)  - reserved, no handler
+  C (pin_setup)   - turn on setup mode, so the companion app can change the
+                    WiFi network or Google account (inkycal.provisioning)
   D (pin_update)  - force an OTA update check/apply (bypasses apply_window)
+
+While setup mode is on the panel shows its one-time code, and A, B and D do
+one thing only: end setup mode and put the calendar back. C restarts its
+clock.
 
 Because the display cannot say anything until the fetch behind a press has
 finished -- 10-60 s of a completely still panel -- every press that does work
@@ -40,15 +45,18 @@ from __future__ import annotations
 
 import glob
 import os
-import pwd
 import subprocess
 import threading
+import time
 from typing import Callable, Optional
 
 from dotenv import dotenv_values
 
+from . import setupmode
+from .appuser import owner_groups as _app_owner_groups, owner_ids as _app_owner_ids
 from .config import CONFIG_PATH_DEFAULT, load_config
 from .feedback import STYLE_NONE, resolve_style
+from .setupmode import SESSION_MINUTES
 from .state import STATE_PATH_DEFAULT
 from .updates import DEFAULT_APP_DIR
 from .viewswap import NO_FRESH_FRAME
@@ -69,29 +77,24 @@ FEEDBACK_TIMEOUT_S = 180
 # display back and leave that to the periodic timer.
 UPDATE_TIMEOUT_S = 900
 
+# The setup agent (inkycal.provisioning) runs only while setup mode is on.
+PROVISIONING_UNIT = "inkycal-provisioning.service"
+
+# A running agent looks for button C's request every second, and a fresh one
+# takes it as it starts; much past this, nothing is coming for it.
+SETUP_REQUEST_WAIT_S = 10.0
+_SETUP_POLL_S = 0.2
+
+# The agent repaints the calendar as it exits, and has the panel's lock to
+# wait out if the setup screen is still being drawn.
+SETUP_STOP_TIMEOUT_S = 120
+
 # Held for as long as a press is being acted on. Someone who presses again
 # while the panel is mid-refresh is telling us the first press hasn't visibly
 # landed yet -- not asking for a second refresh behind it. Without this, those
 # presses queue and the display flashes through one full cycle per press, which
 # looks exactly like the malfunction they were worried about.
 _WORK_LOCK = threading.Lock()
-
-
-def _app_owner_ids(app_dir: str) -> tuple[int, int]:
-    st = os.stat(app_dir)
-    return st.st_uid, st.st_gid
-
-
-def _app_owner_groups(uid: int, gid: int) -> list[int]:
-    # subprocess.run(user=, group=) alone does not call setgroups(); without
-    # this, the child keeps the daemon's (root's) supplementary groups
-    # instead of the app user's real ones (gpio/spi/i2c/video), unlike
-    # systemd's own User=/Group= handling used by the periodic timer.
-    try:
-        username = pwd.getpwuid(uid).pw_name
-        return os.getgrouplist(username, gid)
-    except (KeyError, OSError):
-        return [gid]
 
 
 def _spawn_env(app_dir: str) -> dict:
@@ -307,6 +310,62 @@ def _trigger_force_update(state_path: str) -> bool:
     return True
 
 
+def _wait_for(condition: Callable[[], bool], timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while True:
+        if condition():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(_SETUP_POLL_S)
+
+
+def _start_setup_mode(*, echo: bool) -> bool:
+    """Ask the setup agent for a session, or for more time on the running one.
+
+    The request is a flag file the agent takes, so one press works whether or
+    not the agent is running: `systemctl start` launches it if it isn't, and a
+    running agent picks the flag up within a second. If the flag is still
+    there once the wait is over -- the agent was on its way out as the press
+    landed -- start it once more. Returns whether an agent took the request.
+    """
+    setupmode.request()
+    for _attempt in range(2):
+        try:
+            result = subprocess.run(
+                ["systemctl", "start", PROVISIONING_UNIT],
+                capture_output=True, text=True, timeout=30, check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            result = subprocess.CompletedProcess([], 1, stderr=str(e))
+        if result.returncode != 0:
+            setupmode.take_request()  # nothing is coming for it
+            reason = (result.stderr or "").strip() or f"exit code {result.returncode}"
+            _announce(
+                f"Setup mode is not available: {PROVISIONING_UNIT} would not start ({reason}). "
+                "Install it with scripts/install_provisioning.sh.",
+                echo=echo,
+            )
+            return False
+        if _wait_for(lambda: not setupmode.request_pending(), SETUP_REQUEST_WAIT_S):
+            return True
+    setupmode.take_request()
+    _announce(f"Setup mode did not start; see journalctl -u {PROVISIONING_UNIT}", echo=echo)
+    return False
+
+
+def _leave_setup_mode(*, echo: bool) -> None:
+    """End the setup session. The agent repaints the calendar as it exits."""
+    try:
+        subprocess.run(["systemctl", "stop", PROVISIONING_UNIT], check=False, timeout=SETUP_STOP_TIMEOUT_S)
+    except (OSError, subprocess.SubprocessError) as e:
+        _announce(f"Could not stop setup mode: {e}", echo=echo)
+    # Normally gone already -- the agent clears it on the way out. If the agent
+    # was killed instead, this is what hands the panel back to the calendar
+    # (whose next render repaints: the setup screen cleared the render hash).
+    setupmode.clear()
+
+
 def _run_guarded(label: str, action, *, echo: bool) -> Optional[threading.Thread]:
     """Start acting on one press, unless the previous press is still being acted on.
 
@@ -374,10 +433,20 @@ def main() -> None:
 
     btn_view = Button(buttons_cfg.pin_view, pull_up=True, bounce_time=bounce_time)
     btn_refresh = Button(buttons_cfg.pin_refresh, pull_up=True, bounce_time=bounce_time)
-    btn_unused = Button(buttons_cfg.pin_unused, pull_up=True, bounce_time=bounce_time)
+    btn_setup = Button(buttons_cfg.pin_setup, pull_up=True, bounce_time=bounce_time)
     btn_update = Button(buttons_cfg.pin_update, pull_up=True, bounce_time=bounce_time)
 
+    def leaving_setup_mode(button: str) -> bool:
+        """End setup mode if it's on. True means that was this press's whole job."""
+        if not setupmode.is_active():
+            return False
+        _announce(f"Button {button} pressed during setup mode: leaving setup mode", echo=echo)
+        _run_guarded(f"Button {button} (leave setup)", lambda: _leave_setup_mode(echo=echo), echo=echo)
+        return True
+
     def on_view_pressed() -> None:
+        if leaving_setup_mode("A"):
+            return
         _announce("Button A (view) pressed: toggling daily/weekly view", echo=echo)
 
         def work() -> None:
@@ -386,6 +455,8 @@ def main() -> None:
         _run_guarded("Button A (view)", work, echo=echo)
 
     def on_refresh_pressed() -> None:
+        if leaving_setup_mode("B"):
+            return
         _announce("Button B (refresh) pressed: forcing a display refresh", echo=echo)
 
         def work() -> None:
@@ -394,13 +465,21 @@ def main() -> None:
 
         _run_guarded("Button B (refresh)", work, echo=echo)
 
-    def on_unused_pressed() -> None:
-        # No work follows, so nothing to acknowledge on the panel: a notice
-        # here would spend a full refresh saying "nothing happened". No guard
-        # either -- there is nothing in flight to protect.
-        _announce("Button C pressed: no function assigned", echo=echo)
+    def on_setup_pressed() -> None:
+        # No press notice: the agent paints the setup code straight away, and
+        # that is the acknowledgement.
+        if setupmode.is_active():
+            _announce(
+                f"Button C (setup) pressed: setup mode now switches off {SESSION_MINUTES} minutes from now",
+                echo=echo,
+            )
+        else:
+            _announce("Button C (setup) pressed: turning on setup mode", echo=echo)
+        _run_guarded("Button C (setup)", lambda: _start_setup_mode(echo=echo), echo=echo)
 
     def on_update_pressed() -> None:
+        if leaving_setup_mode("D"):
+            return
         _announce("Button D (update) pressed: forcing an update check/apply", echo=echo)
 
         def work() -> None:
@@ -417,14 +496,14 @@ def main() -> None:
 
     btn_view.when_pressed = on_view_pressed
     btn_refresh.when_pressed = on_refresh_pressed
-    btn_unused.when_pressed = on_unused_pressed
+    btn_setup.when_pressed = on_setup_pressed
     btn_update.when_pressed = on_update_pressed
 
     print(
         "InkyCal buttons ready: "
         f"A=GPIO{buttons_cfg.pin_view} (view) "
         f"B=GPIO{buttons_cfg.pin_refresh} (refresh) "
-        f"C=GPIO{buttons_cfg.pin_unused} (unused) "
+        f"C=GPIO{buttons_cfg.pin_setup} (setup) "
         f"D=GPIO{buttons_cfg.pin_update} (update); "
         f"echo to logged-in terminals {'on' if echo else 'off'}; "
         f"press feedback {feedback_style}"

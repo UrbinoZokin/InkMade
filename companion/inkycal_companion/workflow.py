@@ -3,6 +3,11 @@
 Connection priority, per the product requirement, is **WiFi first, then
 Bluetooth**: we try to find an already-online Pi over mDNS, and only fall
 back to BLE (to set up WiFi) when nothing answers on the network.
+
+The InkyCal only listens while setup mode is on (button C, or by itself
+before it has WiFi or a Google token). Everything sent to it is sealed with a
+key that only the one-time setup code on its screen produces, and the code
+itself is never sent (setupcrypto.py).
 """
 from __future__ import annotations
 
@@ -12,12 +17,29 @@ from typing import Callable, List, Optional
 
 from . import ble_client, discovery, google_oauth, pi_client
 from .discovery import PiDevice
+from .protocol import CODE_DIGITS
 
 Logger = Callable[[str], None]
+
+NO_CODE_HINT = (
+    f"Enter the {CODE_DIGITS}-digit setup code shown on the InkyCal's screen. "
+    "If the screen isn't showing one, press button C on the InkyCal."
+)
 
 
 def _noop(_msg: str) -> None:
     pass
+
+
+def normalize_setup_code(raw: str) -> Optional[str]:
+    """The setup code as the Pi expects it, or None if `raw` isn't one.
+
+    The screen shows it as "482 913", so a space -- or a dash -- is fine.
+    """
+    cleaned = (raw or "").replace(" ", "").replace("-", "")
+    if len(cleaned) == CODE_DIGITS and cleaned.isascii() and cleaned.isdigit():
+        return cleaned
+    return None
 
 
 def find_on_wifi(timeout: float = 5.0, log: Logger = _noop) -> Optional[PiDevice]:
@@ -45,12 +67,12 @@ def provision_wifi_over_ble(
     ble_address: str,
     ssid: str,
     psk: str,
+    setup_code: str,
     log: Logger = _noop,
-    pairing_token: str = "",
 ) -> PiDevice:
     """Push WiFi creds over BLE, then locate the Pi on WiFi. Returns the device."""
     log(f"Sending WiFi credentials for '{ssid}' over Bluetooth…")
-    status = asyncio.run(ble_client.provision_wifi(ble_address, ssid, psk))
+    status = asyncio.run(ble_client.provision_wifi(ble_address, ssid, psk, setup_code))
     ip = status.get("ip")
     log(f"Pi reports it joined WiFi (IP {ip}).")
 
@@ -96,11 +118,11 @@ def run_google_signin(credentials_path: str, log: Logger = _noop) -> str:
 def upload_token(
     device: PiDevice,
     token_json: str,
-    pairing_token: str = "",
+    setup_code: str,
     log: Logger = _noop,
 ) -> dict:
     log(f"Uploading token to {device.host}…")
-    client = pi_client.PiClient(device, pairing_token=pairing_token)
+    client = pi_client.PiClient(device, setup_code=setup_code)
     result = client.upload_token(token_json)
-    log("Token delivered. The InkyCal display will refresh shortly.")
+    log("Token delivered. Setup mode ends and the InkyCal display will refresh shortly.")
     return result

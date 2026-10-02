@@ -151,6 +151,16 @@ def test_ota_arms_the_boot_unit_for_devices_that_never_rerun_install():
     assert any(BOOT_UNIT in line for line in _enable_lines(OTA_SH))
 
 
+def test_a_fresh_install_keeps_the_secrets_private():
+    """The same modes the updater enforces on installs from before them:
+    .env holds the iCloud password, secrets/ the Google token, and the state
+    directory pictures of the schedule."""
+    text = INSTALL_SH.read_text(encoding="utf-8")
+
+    assert re.search(r'chmod 600 "\$ENV_FILE"', text), ".env should be readable by the app's user alone"
+    assert re.search(r'chmod 700 "\$APP_DIR/secrets" "\$STATE_DIR"', text)
+
+
 def test_ota_forces_its_render_after_applying():
     """Updates are applied in the sleep window, where a plain inkycal.service
     run skips the panel once the night's banner is up: "Update pending" -- or

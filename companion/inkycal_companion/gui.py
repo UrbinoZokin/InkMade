@@ -3,7 +3,8 @@
 Tkinter ships with CPython, so the packaged executable needs no extra GUI
 runtime. The flow walks the user through:
 
-  1. Find the InkyCal (WiFi first, then Bluetooth).
+  1. Find the InkyCal (WiFi first, then Bluetooth), and type in the setup
+     code its screen shows while setup mode is on (button C).
   2. If only reachable over Bluetooth, collect WiFi SSID/password and set it up.
   3. Pick the Google client-secrets file and sign in.
   4. Deliver the token to the Pi.
@@ -28,8 +29,8 @@ class CompanionApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("InkyCal Setup")
-        self.root.geometry("620x560")
-        self.root.minsize(560, 480)
+        self.root.geometry("620x600")
+        self.root.minsize(560, 520)
 
         self.log_queue: "queue.Queue[str]" = queue.Queue()
         self.device: Optional[PiDevice] = None
@@ -37,7 +38,7 @@ class CompanionApp:
         self.credentials_path = tk.StringVar()
         self.ssid = tk.StringVar()
         self.psk = tk.StringVar()
-        self.pairing_token = tk.StringVar()
+        self.setup_code = tk.StringVar()
         self.busy = False
 
         self._build()
@@ -55,18 +56,28 @@ class CompanionApp:
 
         ttk.Label(
             self.root,
-            text="Connect your InkyCal to Google Calendar. Make sure your "
-                 "InkyCal is powered on and this computer's Bluetooth is enabled.",
+            text="Connect your InkyCal to Google Calendar. Press button C on "
+                 "your InkyCal to turn on setup mode -- its screen shows a setup "
+                 "code -- and make sure this computer's Bluetooth is enabled.",
             wraplength=580, foreground="#444",
         ).pack(anchor="w", padx=12)
 
         # Step 1: find device
         step1 = ttk.LabelFrame(self.root, text="1. Find your InkyCal")
         step1.pack(fill="x", **pad)
-        self.find_btn = ttk.Button(step1, text="Find My InkyCal", command=self.on_find)
+        find_row = ttk.Frame(step1)
+        find_row.pack(fill="x")
+        self.find_btn = ttk.Button(find_row, text="Find My InkyCal", command=self.on_find)
         self.find_btn.pack(side="left", padx=8, pady=8)
-        self.device_label = ttk.Label(step1, text="Not connected", foreground="#888")
+        self.device_label = ttk.Label(find_row, text="Not connected", foreground="#888")
         self.device_label.pack(side="left", padx=8)
+        code_row = ttk.Frame(step1)
+        code_row.pack(fill="x", padx=8, pady=(0, 8))
+        ttk.Label(code_row, text="Setup code:", width=16).grid(row=0, column=0, sticky="w")
+        ttk.Entry(code_row, textvariable=self.setup_code, width=12).grid(row=0, column=1, sticky="w")
+        ttk.Label(code_row, text="shown on the InkyCal's screen", foreground="#666").grid(
+            row=0, column=2, sticky="w", padx=6
+        )
 
         # Step 2: WiFi setup (only relevant if found over Bluetooth)
         self.step2 = ttk.LabelFrame(self.root, text="2. Set up WiFi (Bluetooth)")
@@ -132,6 +143,12 @@ class CompanionApp:
 
         threading.Thread(target=runner, daemon=True).start()
 
+    def _code_or_complain(self) -> Optional[str]:
+        code = workflow.normalize_setup_code(self.setup_code.get())
+        if code is None:
+            messagebox.showerror("Setup code", workflow.NO_CODE_HINT)
+        return code
+
     def _set_device(self, device: PiDevice) -> None:
         self.device = device
         self.device_label.configure(
@@ -157,7 +174,9 @@ class CompanionApp:
             self.root.after(0, lambda: messagebox.showwarning(
                 "Not found",
                 "No InkyCal found on WiFi or Bluetooth.\n\n"
-                "Check that the device is powered on, then try again.",
+                "The InkyCal only answers while setup mode is on: press "
+                "button C on it, wait for the setup code to appear on its "
+                "screen, then try again.",
             ))
 
     def _enable_wifi_step(self) -> None:
@@ -167,8 +186,9 @@ class CompanionApp:
         self.wifi_btn.configure(state="normal")
         messagebox.showinfo(
             "Bluetooth setup",
-            "Your InkyCal isn't on WiFi yet. Enter your WiFi network name and "
-            "password in step 2, then click 'Send WiFi to InkyCal'.",
+            "Your InkyCal isn't on WiFi yet. Enter the setup code from its "
+            "screen in step 1 and your WiFi network name and password in "
+            "step 2, then click 'Send WiFi to InkyCal'.",
         )
 
     def on_send_wifi(self) -> None:
@@ -177,14 +197,18 @@ class CompanionApp:
         if not self.ssid.get().strip():
             messagebox.showerror("WiFi", "Enter a WiFi network name (SSID).")
             return
-        self._run_bg(self._send_wifi_worker)
+        code = self._code_or_complain()
+        if code is None:
+            return
+        self._run_bg(self._send_wifi_worker, code)
 
-    def _send_wifi_worker(self) -> None:
+    def _send_wifi_worker(self, code: str) -> None:
         try:
             device = workflow.provision_wifi_over_ble(
                 self.bt_devices[0].address,
                 self.ssid.get().strip(),
                 self.psk.get(),
+                code,
                 log=self.log,
             )
         except Exception as exc:
@@ -207,20 +231,20 @@ class CompanionApp:
         if not self.credentials_path.get():
             messagebox.showerror("Missing file", "Choose your Google client-secrets JSON.")
             return
-        self._run_bg(self._authorize_worker)
+        # Checked before the browser opens, not after someone has signed in.
+        code = self._code_or_complain()
+        if code is None:
+            return
+        self._run_bg(self._authorize_worker, code)
 
-    def _authorize_worker(self) -> None:
+    def _authorize_worker(self, code: str) -> None:
         try:
             token = workflow.run_google_signin(self.credentials_path.get(), log=self.log)
         except Exception as exc:
             self.root.after(0, lambda e=exc: messagebox.showerror("Google sign-in failed", str(e)))
             return
         try:
-            workflow.upload_token(
-                self.device, token,
-                pairing_token=self.pairing_token.get().strip(),
-                log=self.log,
-            )
+            workflow.upload_token(self.device, token, code, log=self.log)
         except Exception as exc:
             self.root.after(0, lambda e=exc: messagebox.showerror("Upload failed", str(e)))
             return

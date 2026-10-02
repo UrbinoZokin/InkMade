@@ -22,6 +22,7 @@ from .models import Event, Reminder
 from .network import get_ups_status, get_wifi_status
 from .reminders_google import fetch_google_tasks
 from .render import render_daily_schedule, render_weekly_schedule
+from .setupmode import SetupModeActive
 from .weather import WeatherAlert, WeatherForecastResolver
 from .state import STATE_PATH_DEFAULT, VIEW_MODES, State, load_state, save_state, toggle_view_mode
 from .travel import TravelTimeResolver
@@ -757,7 +758,14 @@ def run_once(
         print("No schedule change; skipping display refresh")
     else:
         img = render(view_mode)
-        show_on_inky(img, rotate_degrees=cfg.display.rotate_degrees, border=cfg.display.border)
+        try:
+            show_on_inky(img, rotate_degrees=cfg.display.rotate_degrees, border=cfg.display.border)
+        except SetupModeActive:
+            # The panel is showing the setup code for the companion app. Record
+            # nothing: the setup screen cleared the render hash, so the first
+            # run after setup mode ends repaints whatever this one would have.
+            print("Setup mode is on; leaving its code on the panel")
+            return
         # Keep a copy of what's on the panel so a button press can redraw it with a
         # "working on it" bar instead of blanking the screen (see inkycal.feedback).
         frames.save_frame(state_path, view_mode, img, sig, now)

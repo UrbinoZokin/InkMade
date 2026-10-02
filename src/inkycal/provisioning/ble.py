@@ -1,10 +1,26 @@
 """BLE GATT peripheral used for first-time WiFi provisioning.
 
 When the Pi has no WiFi yet, the companion app talks to it over Bluetooth
-Low Energy. The app writes the SSID and passphrase, then writes "connect"
-to the command characteristic. We join the network with nmcli and publish
-the result (including the new IP) on the status characteristic so the app
-can switch over to the faster WiFi/HTTP path.
+Low Energy:
+
+  1. The app writes its half of the key exchange (setupcrypto.py) to the
+     pair characteristic, and reads the Pi's half back from it.
+  2. It writes the SSID and passphrase, sealed with the key from that
+     exchange, to the wifi characteristic. We join the network with nmcli
+     and publish the result (including the new IP) on the status
+     characteristic so the app can switch over to the faster WiFi/HTTP path.
+
+Neither the setup code on the panel nor the WiFi passphrase ever goes over
+the air in the clear: the code never goes at all. A sealed message that
+won't open is a wrong code, and counts against the setup session.
+
+Every value written is framed with a 2-byte big-endian length. A value longer
+than one Bluetooth packet reaches us as several writes, each with its offset,
+and a sealed message only opens whole -- opening a piece would count as a
+wrong code.
+
+Only advertised while setup mode is on: the agent that runs this exits when
+the session ends, and BlueZ drops the advertisement with it.
 
 Implemented with ``bluezero`` (BlueZ over D-Bus). bluezero is Linux-only,
 which is exactly where this runs (the Pi). The module degrades gracefully:
@@ -17,61 +33,113 @@ import json
 import threading
 from typing import Callable, Optional
 
-from . import wifi
+from . import setupcrypto, wifi
 from .protocol import (
     BLE_LOCAL_NAME,
     BLE_SERVICE_UUID,
-    BLE_CHAR_SSID_UUID,
-    BLE_CHAR_PSK_UUID,
-    BLE_CHAR_COMMAND_UUID,
     BLE_CHAR_STATUS_UUID,
     BLE_CHAR_INFO_UUID,
-    CMD_CONNECT,
+    BLE_CHAR_PAIR_UUID,
+    BLE_CHAR_WIFI_UUID,
     STATUS_IDLE,
     STATUS_CONNECTING,
     STATUS_CONNECTED,
     STATUS_FAILED,
 )
+from .session import CLOSED, OK, SessionClosed, SetupSession, refusal
 
 
 def _encode(text: str) -> list[int]:
     return list(text.encode("utf-8"))
 
 
-def _decode(value) -> str:
+def _offset(options) -> int:
     try:
-        return bytes(value).decode("utf-8", errors="replace").strip()
+        return int((options or {}).get("offset", 0) or 0)
     except (TypeError, ValueError):
-        return ""
+        return 0
+
+
+class _Reassembly:
+    """Puts a framed value back together from however many writes it came in."""
+
+    def __init__(self) -> None:
+        self._buffer = bytearray()
+
+    def add(self, value, options) -> Optional[bytes]:
+        """Take one write. Returns the whole value once all of it is here."""
+        offset = _offset(options)
+        if offset == 0:
+            self._buffer = bytearray()
+        elif offset != len(self._buffer):
+            self._buffer = bytearray()  # a piece out of place: wait for a fresh start
+            return None
+        self._buffer.extend(bytes(value))
+        if len(self._buffer) < 2:
+            return None
+        size = int.from_bytes(self._buffer[:2], "big")
+        if len(self._buffer) < 2 + size:
+            return None
+        whole = bytes(self._buffer[2:2 + size])
+        self._buffer = bytearray()
+        return whole
 
 
 class BleProvisioner:
-    """GATT peripheral that accepts WiFi credentials and applies them."""
+    """GATT peripheral that accepts sealed WiFi credentials and applies them."""
 
-    def __init__(self, info_provider: Callable[[], dict]) -> None:
+    def __init__(self, info_provider: Callable[[], dict], session: SetupSession) -> None:
         self._info_provider = info_provider
-        self._ssid = ""
-        self._psk = ""
+        self._session = session
+        self._pair_in = _Reassembly()
+        self._wifi_in = _Reassembly()
+        self._pairing: Optional[str] = None
+        self._answer = b""
         self._state = STATUS_IDLE
         self._message = ""
         self._peripheral = None
         self._status_char = None
 
     # --- characteristic callbacks ---
-    def _on_write_ssid(self, value, options) -> None:
-        self._ssid = _decode(value)
-        print(f"[ble] received SSID ({len(self._ssid)} chars)")
+    def _on_write_pair(self, value, options) -> None:
+        message = self._pair_in.add(value, options)
+        if message is None:
+            return
+        self._pairing, self._answer = None, b""
+        try:
+            self._pairing, self._answer = self._session.pair(message)
+        except setupcrypto.BadHandshake as exc:
+            print(f"[ble] key exchange refused: {exc}")
+            self._set_state(STATUS_FAILED, "That wasn't a setup key exchange. Start again.")
+            return
+        except SessionClosed:
+            self._set_state(STATUS_FAILED, refusal(CLOSED, self._session))
+            return
+        print("[ble] key exchange answered")
 
-    def _on_write_psk(self, value, options) -> None:
-        self._psk = _decode(value)
-        print(f"[ble] received passphrase ({len(self._psk)} chars)")
+    def _read_pair(self, options) -> list[int]:
+        return list(self._answer[_offset(options):])
 
-    def _on_write_command(self, value, options) -> None:
-        cmd = _decode(value).lower()
-        print(f"[ble] command: {cmd}")
-        if cmd == CMD_CONNECT:
-            # Run the (blocking) nmcli join off the D-Bus callback thread.
-            threading.Thread(target=self._do_connect, daemon=True).start()
+    def _on_write_wifi(self, value, options) -> None:
+        sealed = self._wifi_in.add(value, options)
+        if sealed is None:
+            return
+        # An exchange carries one message: a retry starts a fresh exchange.
+        pairing, self._pairing = self._pairing, None
+        verdict, plaintext, _channel = self._session.open(pairing, sealed, setupcrypto.WIFI)
+        if verdict != OK:
+            print(f"[ble] WiFi settings refused: setup code {verdict}")
+            self._set_state(STATUS_FAILED, refusal(verdict, self._session))
+            return
+        try:
+            request = json.loads(plaintext)
+            ssid, psk = str(request["ssid"]), str(request.get("psk", ""))
+        except (ValueError, KeyError, TypeError):
+            self._set_state(STATUS_FAILED, "Those weren't WiFi settings.")
+            return
+        print(f"[ble] received WiFi settings ({len(ssid)}-character network name)")
+        # Run the (blocking) nmcli join off the D-Bus callback thread.
+        threading.Thread(target=self._do_connect, args=(ssid, psk), daemon=True).start()
 
     def _read_status(self) -> list[int]:
         return _encode(self._status_json())
@@ -107,9 +175,9 @@ class BleProvisioner:
             except Exception as exc:  # notify is best-effort
                 print(f"[ble] status notify failed: {exc}")
 
-    def _do_connect(self) -> None:
-        self._set_state(STATUS_CONNECTING, f"Joining {self._ssid}")
-        ok, message = wifi.configure_wifi(self._ssid, self._psk)
+    def _do_connect(self, ssid: str, psk: str) -> None:
+        self._set_state(STATUS_CONNECTING, f"Joining {ssid}")
+        ok, message = wifi.configure_wifi(ssid, psk)
         if ok:
             self._set_state(STATUS_CONNECTED, message)
         else:
@@ -157,39 +225,30 @@ class BleProvisioner:
             self._peripheral.add_service(srv_id=1, uuid=BLE_SERVICE_UUID, primary=True)
 
             self._peripheral.add_characteristic(
-                srv_id=1, chr_id=1, uuid=BLE_CHAR_SSID_UUID,
-                value=[], notifying=False, flags=["write", "write-without-response"],
-                write_callback=self._on_write_ssid,
-            )
-            self._peripheral.add_characteristic(
-                srv_id=1, chr_id=2, uuid=BLE_CHAR_PSK_UUID,
-                value=[], notifying=False, flags=["write", "write-without-response"],
-                write_callback=self._on_write_psk,
-            )
-            self._peripheral.add_characteristic(
-                srv_id=1, chr_id=3, uuid=BLE_CHAR_COMMAND_UUID,
-                value=[], notifying=False, flags=["write"],
-                write_callback=self._on_write_command,
-            )
-            self._peripheral.add_characteristic(
-                srv_id=1, chr_id=4, uuid=BLE_CHAR_STATUS_UUID,
+                srv_id=1, chr_id=1, uuid=BLE_CHAR_STATUS_UUID,
                 value=_encode(self._status_json()), notifying=False,
                 flags=["read", "notify"], read_callback=self._read_status,
             )
+            # Kept for notifications.
+            self._status_char = self._peripheral.characteristics[-1]
             self._peripheral.add_characteristic(
-                srv_id=1, chr_id=5, uuid=BLE_CHAR_INFO_UUID,
+                srv_id=1, chr_id=2, uuid=BLE_CHAR_INFO_UUID,
                 value=[], notifying=False, flags=["read"],
                 read_callback=self._read_info,
+            )
+            self._peripheral.add_characteristic(
+                srv_id=1, chr_id=3, uuid=BLE_CHAR_PAIR_UUID,
+                value=[], notifying=False, flags=["read", "write"],
+                read_callback=self._read_pair, write_callback=self._on_write_pair,
+            )
+            self._peripheral.add_characteristic(
+                srv_id=1, chr_id=4, uuid=BLE_CHAR_WIFI_UUID,
+                value=[], notifying=False, flags=["write"],
+                write_callback=self._on_write_wifi,
             )
         except Exception as exc:
             print(f"[ble] failed to build GATT peripheral: {exc}")
             return False
-
-        # Keep a handle to the status characteristic for notifications.
-        try:
-            self._status_char = self._peripheral.characteristics[3]
-        except (IndexError, AttributeError):
-            self._status_char = None
 
         print(f"[ble] advertising '{BLE_LOCAL_NAME}' (service {BLE_SERVICE_UUID})")
         # publish() blocks running the GLib mainloop, so run it in a thread.

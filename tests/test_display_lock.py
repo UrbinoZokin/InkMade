@@ -7,7 +7,7 @@ import types
 import pytest
 from PIL import Image
 
-from inkycal import display_inky
+from inkycal import display_inky, setupmode
 from inkycal.display_inky import display_lock, show_on_inky
 
 
@@ -173,3 +173,46 @@ def test_renders_unlocked_when_flock_is_unsupported(lock_path, monkeypatch):
 
     with display_lock(lock_path, timeout=1) as acquired:
         assert acquired is False
+
+
+@pytest.fixture
+def setup_marker(tmp_path, monkeypatch):
+    path = tmp_path / "setup-mode.json"
+    monkeypatch.setattr(setupmode, "MARKER_PATH", str(path))
+    return path
+
+
+def test_show_on_inky_leaves_the_setup_code_on_the_panel(fake_inky, setup_marker):
+    """While setup mode is on, the panel shows the one code the companion app
+    needs; a render painting over it would strand whoever is setting up."""
+    setupmode.mark_active(60)
+
+    with pytest.raises(setupmode.SetupModeActive):
+        show_on_inky(Image.new("RGB", (8, 8), "white"))
+
+    assert fake_inky.image is None, "the panel must not have been touched"
+
+
+def test_the_setup_screen_itself_still_paints(fake_inky, setup_marker):
+    setupmode.mark_active(60)
+
+    show_on_inky(Image.new("RGB", (8, 8), "white"), setup_screen=True)
+
+    assert fake_inky.image is not None
+
+
+def test_setup_mode_is_checked_while_holding_the_lock(fake_inky, setup_marker, lock_path, monkeypatch):
+    """A render that started fetching before setup mode began waits for the
+    lock behind the setup screen's refresh. Checking before taking the lock
+    would let it through to paint over the code once that refresh is done."""
+    held_when_asked = []
+
+    def asked():
+        held_when_asked.append(_is_locked(lock_path))
+        return False
+
+    monkeypatch.setattr(setupmode, "is_active", asked)
+
+    show_on_inky(Image.new("RGB", (8, 8), "white"))
+
+    assert held_when_asked == [True]

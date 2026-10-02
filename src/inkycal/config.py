@@ -71,7 +71,7 @@ class ButtonsConfig:
     # (4"/5.7"/7.3") Impression sizes.
     pin_view: int = 5      # A: toggle daily/weekly view
     pin_refresh: int = 6   # B: force a display refresh
-    pin_unused: int = 25   # C: unused (reserved)
+    pin_setup: int = 25    # C: turn on setup mode (was `pin_unused`, still read)
     pin_update: int = 24   # D: force an OTA update check/apply
     bounce_time_ms: int = 300
     # Echo each press to the terminals of anyone logged in (SSH sessions and
@@ -163,7 +163,9 @@ def load_config(path: str) -> AppConfig:
             enabled=bool(buttons.get("enabled", True)),
             pin_view=int(buttons.get("pin_view", 5)),
             pin_refresh=int(buttons.get("pin_refresh", 6)),
-            pin_unused=int(buttons.get("pin_unused", 25)),
+            # Button C had no function until setup mode, and config files
+            # written before then name its pin `pin_unused`.
+            pin_setup=int(buttons.get("pin_setup", buttons.get("pin_unused", 25))),
             pin_update=int(buttons.get("pin_update", 24)),
             bounce_time_ms=int(buttons.get("bounce_time_ms", 300)),
             echo_to_terminals=bool(buttons.get("echo_to_terminals", True)),

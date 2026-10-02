@@ -59,6 +59,26 @@ def primary_ip() -> Optional[str]:
         return None
 
 
+def has_saved_wifi_connection() -> bool:
+    """Whether NetworkManager has a WiFi network saved to join, connected or not.
+
+    Errs towards True: when nmcli can't answer, this device's WiFi isn't
+    managed by NetworkManager at all, and the Bluetooth path -- which drives
+    nmcli -- couldn't set it up anyway.
+    """
+    if not _nmcli_available():
+        return True
+    try:
+        proc = _run(["nmcli", "-t", "-f", "TYPE", "connection", "show"], timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return True
+    if proc.returncode != 0:
+        return True
+    # Terse output names the type by its setting ("802-11-wireless"); accept
+    # the short alias too, which some nmcli versions print instead.
+    return any(line.strip() in ("802-11-wireless", "wifi") for line in proc.stdout.splitlines())
+
+
 def status() -> WifiStatus:
     ssid = current_ssid()
     ip = primary_ip()

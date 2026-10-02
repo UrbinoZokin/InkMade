@@ -65,7 +65,10 @@ auto_update:
 #   A (pin_view)    - toggle between the daily view and a weekly view
 #                     (next 7 days, event names only, no times)
 #   B (pin_refresh) - force an immediate display refresh
-#   C (pin_unused)  - unused / reserved for future use
+#   C (pin_setup)   - turn on setup mode for 10 minutes: the screen shows a
+#                     one-time code, and the companion app can change the
+#                     WiFi network or Google account (C again: 10 more
+#                     minutes; A, B or D: back to the calendar)
 #   D (pin_update)  - force an OTA update check, and apply it right away
 #                     if one is pending (bypasses apply_window)
 # Pin numbers are BCM GPIO numbers. The defaults below match the 13.3"
@@ -79,12 +82,12 @@ auto_update:
 #   none   - no acknowledgement; the display stays put until content is ready
 # The Impression has no partial refresh, so banner/wipe cost one extra
 # full-panel repaint: content lands roughly twice as slowly, but you can see
-# the press landed. Button C (unused) never shows one -- no work follows it.
+# the press landed. Button C never shows one: the setup code is its answer.
 buttons:
   enabled: true
   pin_view: 5
   pin_refresh: 6
-  pin_unused: 25
+  pin_setup: 25         # called pin_unused before setup mode; still read
   pin_update: 24
   bounce_time_ms: 300   # debounce window for the physical tactile buttons
   press_feedback: "banner"
