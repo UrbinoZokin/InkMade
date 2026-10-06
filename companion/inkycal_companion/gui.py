@@ -56,8 +56,8 @@ class CompanionApp:
 
         ttk.Label(
             self.root,
-            text="Connect your InkyCal to Google Calendar. Press button C on "
-                 "your InkyCal to turn on setup mode -- its screen shows a setup "
+            text="Connect your InkyCal to Google Calendar. Hold down button C on "
+                 "your InkyCal for 3 seconds to turn on setup mode -- its screen shows a setup "
                  "code -- and make sure this computer's Bluetooth is enabled.",
             wraplength=580, foreground="#444",
         ).pack(anchor="w", padx=12)
@@ -174,8 +174,8 @@ class CompanionApp:
             self.root.after(0, lambda: messagebox.showwarning(
                 "Not found",
                 "No InkyCal found on WiFi or Bluetooth.\n\n"
-                "The InkyCal only answers while setup mode is on: press "
-                "button C on it, wait for the setup code to appear on its "
+                "The InkyCal only answers while setup mode is on: hold down "
+                "button C on it for 3 seconds, wait for the setup code to appear on its "
                 "screen, then try again.",
             ))
 

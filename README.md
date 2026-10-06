@@ -15,6 +15,7 @@ PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather
 - Google Calendar + Apple iCloud (CalDAV) sync  
 - Google Tasks shown as a separate “Reminders” region (due today + overdue)  
 - Contact birthdays from Google's Contacts calendar, grouped on their own row  
+- The rest of the week's birthdays listed as “Upcoming birthdays”, early enough to post a card  
 - Sorted by start time (all-day events first)  
 - Portrait layout for 13.3" display  
 - Updates every 15 minutes  
@@ -22,7 +23,8 @@ PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather
 - Nightly sleep window with one-time “Sleeping…” banner  
 - Weekly deep clean refresh to reduce ghosting  
 - Over-the-air updates (pulls new code from GitHub on its own — no SSH)  
-- Physical buttons: switch daily/weekly view, force refresh, setup mode, force update  
+- Physical buttons: switch daily/weekly view, force refresh, setup mode, force update
+  (the last two only when held down, so a stray tap can't trigger them)  
 - The setup agent only listens in setup mode, behind a one-time code shown on the screen  
 - Presses are acknowledged on the display before the slow work starts  
 - Switching views is a single refresh: the other view is kept drawn ahead of time  
@@ -43,13 +45,21 @@ wired up as follows:
 | --- | --- |
 | A | Toggle between the daily view (default) and a weekly view showing the next 7 days' event names (no times) |
 | B | Force an immediate display refresh |
-| C | Turn on setup mode for 10 minutes, so the companion app can change the WiFi network or Google account (see *Setup mode* below) |
-| D | Force an OTA update check, applying it right away if one is pending (bypasses the overnight `apply_window`) |
+| C | **Hold for 3 seconds:** turn on setup mode for 10 minutes, so the companion app can change the WiFi network or Google account (see *Setup mode* below) |
+| D | **Hold for 3 seconds:** force an OTA update check, applying it right away if one is pending (bypasses the overnight `apply_window`) |
+
+A and B are for whoever lives with the display; C and D are for whoever looks
+after it. So C and D do nothing until they've been held down for 3 seconds: a
+tap on either — reaching for A or B, or dusting the frame — would otherwise
+replace the calendar with a setup code or an update notice. A tap is only
+noted in the journal (and echoed over SSH), as `Button C (setup) let go too
+soon`. While setup mode is on, a tap on A, B *or* D still leaves it: getting
+back to the calendar never needs a hold.
 
 Pressing B re-renders instantly using the same code path as the periodic
 timer, so credentials and file ownership stay consistent. Pressing A usually
 has nothing to render (see *Switching views* below); when it does, it takes
-that same path. Pressing D asks `inkycal-update.service` to check GitHub and,
+that same path. Holding D asks `inkycal-update.service` to check GitHub and,
 if the checkout is behind, apply the update immediately instead of waiting
 for the next scheduled window.
 
@@ -113,15 +123,15 @@ The companion app changes the WiFi network and Google account through the
 setup agent (`inkycal-provisioning.service`), and the agent only runs while
 **setup mode** is on:
 
-- Press **C** and the screen shows a one-time **setup code** within a minute.
-  Setup mode then stays on for 10 minutes; pressing C again restarts the 10
-  minutes.
+- Hold **C** down for 3 seconds and the screen shows a one-time **setup code**
+  within a minute. Setup mode then stays on for 10 minutes; holding C again
+  restarts the 10 minutes.
 - An InkyCal with no Google token or WiFi network yet starts in setup mode by
   itself at power-on. (Only using iCloud? Set `calendars.google.enabled:
   false`, or the missing Google token counts.)
 - It ends after the 10 minutes, as soon as the Google token arrives, after 5
-  wrong codes, or when you press A, B or D — which then do nothing else. The
-  calendar comes back by itself.
+  wrong codes, or when you press A, B or D (a tap is enough) — which then do
+  nothing else. The calendar comes back by itself.
 
 The companion app asks for the code, and the Pi refuses any change, over
 Bluetooth or WiFi, that isn't sealed with it — so changing the device means
@@ -291,9 +301,12 @@ this checkout is behind the tracked branch. This is cheap (a `git fetch` that
 finds nothing is a couple of tiny requests — ~96/day is well within GitHub's
 limits, and no auth token is used), so there's no rate-limit concern.
 
-**Showing status.** When an update is available, the bottom status bar (next to
-the WiFi icon) shows **"Update pending"** in red — visible confirmation on the
-screen that your push was received.
+**Showing status.** When an update is available, the bottom status bar shows a
+small black **hexagon with an upward arrow** just left of the WiFi icon —
+confirmation on the screen that your push was received. It used to say "Update
+pending" in red, but the person who sees the display every day can't do
+anything about a pending update, and red reads as something wrong; the badge is
+there for anyone who knows to look for it.
 
 **Applying.** A systemd timer (`inkycal-update.timer`) runs
 `scripts/ota_update.sh` and, when it finds the checkout behind, pulls and
@@ -305,7 +318,7 @@ applies the update:
   `requirements-provisioning.txt` changed, on a device that has the agent
 - restarts the setup agent only if it's the always-on kind from before setup
   mode (a setup session in progress is left to finish)
-- forces a fresh display render with the new code, so "Update pending" comes
+- forces a fresh display render with the new code, so the update badge comes
   off the screen straight away, even overnight
 
 By default this is done **only during the overnight sleep window**, so the
@@ -325,7 +338,7 @@ auto_update:
 Useful commands (on the Pi):
 
 ```bash
-# Update right now instead of waiting for the overnight window (what button D
+# Update right now instead of waiting for the overnight window (what holding D
 # does). Without the flag file this only checks, and applies overnight.
 sudo touch /var/lib/inkycal/force_update
 sudo systemctl start inkycal-update.service
@@ -373,8 +386,8 @@ and delivers the token to the Pi — no keyboard or monitor on the Pi needed.
 cd /opt/inkycal && ./scripts/install_provisioning.sh
 ```
 
-The agent only runs in setup mode (see *Setup mode* above): press button C,
-and the screen shows the setup code the companion app asks for. While it runs,
+The agent only runs in setup mode (see *Setup mode* above): hold button C for
+3 seconds, and the screen shows the setup code the companion app asks for. While it runs,
 it advertises the Pi over Bluetooth (`InkyCal-Setup`) and, once online, over
 mDNS (`_inkycal._tcp`).
 
@@ -405,7 +418,11 @@ The Pi runs headless, so the OAuth consent flow happens on another machine.
 > (`addressbook#contacts@group.v.calendar.google.com`), which is not part of
 > `primary`. InkyCal adds it automatically — it needs no OAuth scope beyond the
 > `calendar.readonly` the token already has — and the day's birthdays render as
-> their own “Birthdays: …” row. Turn it off with
+> their own “Birthdays: …” row. The rest of the week's (from the day after
+> tomorrow) are listed near the bottom of the daily view as “Upcoming
+> birthdays: Emma (Fri) • Tom (Sun)”, early enough to post a card; they come
+> out of the week the display already fetches for the weekly view, so this
+> costs no extra requests. Turn it all off with
 > `calendars.google.birthdays_enabled: false`. Apple does **not** publish the
 > equivalent iCloud Contacts birthday calendar over CalDAV (it is generated
 > on-device), so iCloud birthdays only appear if you keep them in a real

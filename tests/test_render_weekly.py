@@ -155,21 +155,3 @@ def test_multiday_all_day_event_appears_on_every_day_it_spans(monkeypatch):
     texts = [t for _, t in observed]
     assert texts.count("Family Trip") == 3
     assert texts.count("No events") == 4
-
-
-def test_update_pending_line_is_drawn(monkeypatch):
-    tz = ZoneInfo("America/Phoenix")
-    observed = _capture_text(monkeypatch)
-
-    render_weekly_schedule(
-        canvas_w=1200,
-        canvas_h=1600,
-        now=datetime(2026, 2, 5, 8, 0, tzinfo=tz),
-        week_events=[],
-        tz=tz,
-        show_sleep_banner=False,
-        sleep_banner_text="",
-        update_pending=True,
-    )
-
-    assert any("Update pending" in t for _, t in observed)

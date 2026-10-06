@@ -23,7 +23,7 @@ Logger = Callable[[str], None]
 
 NO_CODE_HINT = (
     f"Enter the {CODE_DIGITS}-digit setup code shown on the InkyCal's screen. "
-    "If the screen isn't showing one, press button C on the InkyCal."
+    "If the screen isn't showing one, hold down button C on the InkyCal for 3 seconds."
 )
 
 

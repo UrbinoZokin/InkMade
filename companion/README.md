@@ -7,7 +7,7 @@ events show up on the display. No keyboard or monitor on the Pi required.
 
 ## What it does
 
-0. **You press button C on the InkyCal.** That turns on *setup mode* for 10
+0. **You hold down button C on the InkyCal for 3 seconds.** That turns on *setup mode* for 10
    minutes, and the screen shows a one-time **setup code**. The InkyCal only
    listens for the app while setup mode is on, and refuses anything that isn't
    sealed with that code. (One that has no WiFi or Google token yet starts in
@@ -93,9 +93,9 @@ itself never leaves your computer: the app and the Pi agree the key with
 SPAKE2, a password-authenticated key exchange, so anyone listening sees only
 ciphertext and can't even test guesses at the code. The GUI asks for it in
 step 1; the CLI takes `--setup-code` (or asks). It is good for one setup
-session: 10 minutes after the last press of button C, until the Google token
+session: 10 minutes after button C was last held, until the Google token
 is delivered, or until 5 wrong codes have been tried, whichever comes first.
-After that, press C again for a new code.
+After that, hold C again for a new code.
 
 The app won't fall back to sending anything in the clear. An InkyCal whose
 software predates this says so instead: press button D on it to update it

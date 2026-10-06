@@ -163,7 +163,7 @@ def test_a_fresh_install_keeps_the_secrets_private():
 
 def test_ota_forces_its_render_after_applying():
     """Updates are applied in the sleep window, where a plain inkycal.service
-    run skips the panel once the night's banner is up: "Update pending" -- or
+    run skips the panel once the night's banner is up: the update badge -- or
     button D's "Checking for updates..." notice -- would stay until morning."""
     text = OTA_SH.read_text(encoding="utf-8")
 

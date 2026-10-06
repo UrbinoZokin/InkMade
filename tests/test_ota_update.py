@@ -5,7 +5,7 @@ line, and systemd sets no $HOME for a unit like that (systemd.exec(5)). The
 updater used to write root's global git config as its first step, which git
 refuses without a $HOME, so every scheduled run died before it fetched
 anything. Nothing on the panel showed it: an updater that dies and one waiting
-for tonight's apply window both leave "Update pending" on screen.
+for tonight's apply window both leave the update badge on screen.
 
 So these run the real script against a throwaway checkout, with $HOME unset
 and systemctl stubbed out.
@@ -162,7 +162,7 @@ def _owned_by_root(top: Path, *, skip: tuple[str, ...] = ()) -> list[str]:
 
 def test_applies_a_pending_update_without_home(tmp_path):
     """The run systemd actually makes has to get all the way through: fetch,
-    reset, and the render that takes "Update pending" off the panel."""
+    reset, and the render that takes the update badge off the panel."""
     dev = _make_device(tmp_path)
     new = dev.push("v2")
 
@@ -172,7 +172,7 @@ def test_applies_a_pending_update_without_home(tmp_path):
     assert _git(dev.app, "rev-parse", "HEAD") == new
     calls = dev.systemctl_calls()
     # Forced: updates land in the sleep window, where a plain render returns
-    # early once the night's banner is up and leaves "Update pending" until
+    # early once the night's banner is up and leaves the update badge up until
     # morning.
     assert "start --no-block inkycal-boot.service" in calls, (
         "applied the update but never asked for a forced render with the new code"

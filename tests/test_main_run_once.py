@@ -71,7 +71,7 @@ def _render_daily(**kw) -> Image.Image:
 def panel(tmp_path, monkeypatch):
     """A stubbed render + panel. Returns the list of frames pushed to it; each
     frame's info records whether it was drawn with the sleep banner and with
-    "Update pending"."""
+    the update badge."""
     shown = []
     monkeypatch.setattr(main, "WeatherForecastResolver", _NoWeather)
     monkeypatch.setattr(main, "render_daily_schedule", _render_daily)
@@ -223,7 +223,7 @@ def test_sleep_banner_goes_up_once_a_night_as_the_window_opens(tmp_path, panel, 
 def test_a_forced_render_takes_update_pending_off_the_sleeping_panel(tmp_path, panel, clock, monkeypatch):
     """ota_update.sh applies updates inside the sleep window and then forces a
     render (through inkycal-boot.service). Unforced, that render returns early
-    once the night's banner is up, and the panel keeps saying "Update pending"
+    once the night's banner is up, and the panel keeps showing the update badge
     until the 06:30 wake-up."""
     config_path = _config(tmp_path, sleep_enabled="true", auto_update="true")
     state_path = str(tmp_path / "state.json")

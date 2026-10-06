@@ -7,13 +7,21 @@ touches the display, calendar credentials, or state file directly.
 
   A (pin_view)    - switch between the daily and weekly views
   B (pin_refresh) - force a refresh
-  C (pin_setup)   - turn on setup mode, so the companion app can change the
-                    WiFi network or Google account (inkycal.provisioning)
-  D (pin_update)  - force an OTA update check/apply (bypasses apply_window)
+  C (pin_setup)   - held: turn on setup mode, so the companion app can change
+                    the WiFi network or Google account (inkycal.provisioning)
+  D (pin_update)  - held: force an OTA update check/apply (bypasses
+                    apply_window)
+
+C and D only act once held down for setupmode.HOLD_SECONDS. They're for
+whoever looks after the device, not whoever lives with it, and a tap on
+either -- reaching for A or B, or dusting the frame -- would otherwise put a
+setup code or an update notice up in place of the calendar. A tap is logged
+and otherwise ignored.
 
 While setup mode is on the panel shows its one-time code, and A, B and D do
-one thing only: end setup mode and put the calendar back. C restarts its
-clock.
+one thing only: end setup mode and put the calendar back. A tap is enough
+for that, D included: getting back to the calendar should never be the hard
+part. Holding C restarts the clock.
 
 Because the display cannot say anything until the fetch behind a press has
 finished -- 10-60 s of a completely still panel -- every press that does work
@@ -56,7 +64,7 @@ from . import setupmode
 from .appuser import owner_groups as _app_owner_groups, owner_ids as _app_owner_ids
 from .config import CONFIG_PATH_DEFAULT, load_config
 from .feedback import STYLE_NONE, resolve_style
-from .setupmode import SESSION_MINUTES
+from .setupmode import HOLD_SECONDS, SESSION_MINUTES
 from .state import STATE_PATH_DEFAULT
 from .updates import DEFAULT_APP_DIR
 from .viewswap import NO_FRESH_FRAME
@@ -406,6 +414,52 @@ def _run_guarded(label: str, action, *, echo: bool) -> Optional[threading.Thread
     return worker
 
 
+class _HoldToAct:
+    """The press, held and released handlers of a button that only acts once held.
+
+    `on_held` runs once the button has been down for the gpiozero Button's
+    hold_time; a press let go sooner is announced and otherwise ignored.
+    `on_press`, if given, runs as the button goes down and may claim the press
+    by returning True, which is how a tap on D still leaves setup mode. A
+    claimed press does nothing more, however long it's held.
+
+    Whether this press has been acted on is tracked here rather than read from
+    gpiozero's is_held, which gpiozero clears before when_released fires.
+    """
+
+    def __init__(
+        self,
+        label: str,
+        purpose: str,
+        on_held: Callable[[], None],
+        *,
+        echo: bool,
+        on_press: Optional[Callable[[], bool]] = None,
+    ) -> None:
+        self._label = label
+        self._purpose = purpose
+        self._on_held = on_held
+        self._on_press = on_press
+        self._echo = echo
+        self._acted = False
+
+    def pressed(self) -> None:
+        self._acted = bool(self._on_press is not None and self._on_press())
+
+    def held(self) -> None:
+        if self._acted:
+            return
+        self._acted = True
+        self._on_held()
+
+    def released(self) -> None:
+        if not self._acted:
+            _announce(
+                f"{self._label} let go too soon: hold it for {HOLD_SECONDS} seconds to {self._purpose}",
+                echo=self._echo,
+            )
+
+
 def main() -> None:
     from gpiozero import Button
     from signal import pause
@@ -433,8 +487,8 @@ def main() -> None:
 
     btn_view = Button(buttons_cfg.pin_view, pull_up=True, bounce_time=bounce_time)
     btn_refresh = Button(buttons_cfg.pin_refresh, pull_up=True, bounce_time=bounce_time)
-    btn_setup = Button(buttons_cfg.pin_setup, pull_up=True, bounce_time=bounce_time)
-    btn_update = Button(buttons_cfg.pin_update, pull_up=True, bounce_time=bounce_time)
+    btn_setup = Button(buttons_cfg.pin_setup, pull_up=True, bounce_time=bounce_time, hold_time=HOLD_SECONDS)
+    btn_update = Button(buttons_cfg.pin_update, pull_up=True, bounce_time=bounce_time, hold_time=HOLD_SECONDS)
 
     def leaving_setup_mode(button: str) -> bool:
         """End setup mode if it's on. True means that was this press's whole job."""
@@ -465,22 +519,20 @@ def main() -> None:
 
         _run_guarded("Button B (refresh)", work, echo=echo)
 
-    def on_setup_pressed() -> None:
+    def on_setup_held() -> None:
         # No press notice: the agent paints the setup code straight away, and
         # that is the acknowledgement.
         if setupmode.is_active():
             _announce(
-                f"Button C (setup) pressed: setup mode now switches off {SESSION_MINUTES} minutes from now",
+                f"Button C (setup) held: setup mode now switches off {SESSION_MINUTES} minutes from now",
                 echo=echo,
             )
         else:
-            _announce("Button C (setup) pressed: turning on setup mode", echo=echo)
+            _announce("Button C (setup) held: turning on setup mode", echo=echo)
         _run_guarded("Button C (setup)", lambda: _start_setup_mode(echo=echo), echo=echo)
 
-    def on_update_pressed() -> None:
-        if leaving_setup_mode("D"):
-            return
-        _announce("Button D (update) pressed: forcing an update check/apply", echo=echo)
+    def on_update_held() -> None:
+        _announce("Button D (update) held: forcing an update check/apply", echo=echo)
 
         def work() -> None:
             acknowledge("Checking for updates... please wait")
@@ -494,17 +546,28 @@ def main() -> None:
 
         _run_guarded("Button D (update)", work, echo=echo)
 
+    setup_hold = _HoldToAct("Button C (setup)", "turn on setup mode", on_setup_held, echo=echo)
+    update_hold = _HoldToAct(
+        "Button D (update)",
+        "check for updates",
+        on_update_held,
+        echo=echo,
+        on_press=lambda: leaving_setup_mode("D"),
+    )
+
     btn_view.when_pressed = on_view_pressed
     btn_refresh.when_pressed = on_refresh_pressed
-    btn_setup.when_pressed = on_setup_pressed
-    btn_update.when_pressed = on_update_pressed
+    for button, hold in ((btn_setup, setup_hold), (btn_update, update_hold)):
+        button.when_pressed = hold.pressed
+        button.when_held = hold.held
+        button.when_released = hold.released
 
     print(
         "InkyCal buttons ready: "
         f"A=GPIO{buttons_cfg.pin_view} (view) "
         f"B=GPIO{buttons_cfg.pin_refresh} (refresh) "
-        f"C=GPIO{buttons_cfg.pin_setup} (setup) "
-        f"D=GPIO{buttons_cfg.pin_update} (update); "
+        f"C=GPIO{buttons_cfg.pin_setup} (setup, hold {HOLD_SECONDS}s) "
+        f"D=GPIO{buttons_cfg.pin_update} (update, hold {HOLD_SECONDS}s); "
         f"echo to logged-in terminals {'on' if echo else 'off'}; "
         f"press feedback {feedback_style}"
     )

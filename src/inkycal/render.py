@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -280,6 +281,51 @@ def _prepare_weather_alert_lines(
         lines.extend(wrapped)
     return lines
 
+
+def _upcoming_birthday_lines(
+    draw: ImageDraw.ImageDraw,
+    birthdays: List[Event],
+    tz: ZoneInfo,
+    font: ImageFont.FreeTypeFont,
+    max_width: float,
+    max_lines: int = 2,
+) -> List[str]:
+    """The line "Upcoming birthdays: Jane Doe (Sat) • Tom (Mon)", wrapped to at most `max_lines`.
+
+    Lines break between people, never inside one, so a name stays with its
+    day and no line ends on a dangling "•". Names that don't fit are counted
+    at the end ("+2 more") rather than dropped without a word.
+    """
+    if not birthdays:
+        return []
+    entries = [f"{e.title} ({e.start.astimezone(tz).strftime('%a')})" for e in birthdays]
+
+    def wrap(parts: List[str]) -> List[str]:
+        lines = ["Upcoming birthdays:"]
+        line_has_entry = False
+        for part in parts:
+            candidate = lines[-1] + (" • " if line_has_entry else " ") + part
+            if draw.textlength(candidate, font=font) <= max_width:
+                lines[-1] = candidate
+            elif line_has_entry:
+                # A new line for this one (broken inside only if it's wider than a line).
+                lines.extend(_wrap_text(draw, part, font, max_width, max_lines=None))
+            else:
+                # Not even the first name fits beside the label.
+                lines[-1:] = _wrap_text(draw, candidate, font, max_width, max_lines=None)
+            line_has_entry = True
+        return lines
+
+    lines: List[str] = []
+    for shown in range(len(entries), 0, -1):
+        parts = entries[:shown]
+        if shown < len(entries):
+            parts.append(f"+{len(entries) - shown} more")
+        lines = wrap(parts)
+        if len(lines) <= max_lines:
+            return lines
+    return lines[:max_lines]
+
 def _draw_reminders_region(
     draw: ImageDraw.ImageDraw,
     reminders: List[Reminder],
@@ -357,6 +403,7 @@ def render_daily_schedule(
     weather_alerts: Optional[List[WeatherAlert]] = None,
     reminders: Optional[List[Reminder]] = None,
     update_pending: bool = False,
+    upcoming_birthdays: Optional[List[Event]] = None,
 ) -> Image.Image:
     img = Image.new("RGB", (canvas_w, canvas_h), "white")
     d = ImageDraw.Draw(img)
@@ -373,6 +420,7 @@ def render_daily_schedule(
     font_tomorrow_weather_bold = _load_bold_font(36)
     font_reminder_header = _load_bold_font(40)
     font_reminder = _load_font(38)
+    font_upcoming = _load_font(34)
 
     padding = 40
     y = padding
@@ -419,21 +467,14 @@ def render_daily_schedule(
     updated_block_h = updated_text_h + updated_gap
     ups_on_second_line = False
     ups_text_h = font_small.size + 6
-    wifi_icon_size = max(18, int(font_small.size * 0.9))
-    wifi_left = canvas_w - padding - wifi_icon_size
+    status_icons_left = _status_icons_left(canvas_w, padding, font_small, update_pending)
     if ups_text:
         ups_text_w = d.textlength(ups_text, font=font_small)
-        ups_right = wifi_left - 10
+        ups_right = status_icons_left - 10
         min_ups_x = padding + updated_text_w + 10
         if ups_right - ups_text_w < min_ups_x:
             ups_on_second_line = True
             updated_block_h += ups_text_h + 8
-
-    # Over-the-air update status (its own line above the "Updated:" line).
-    ota_text = _format_update_status(update_pending)
-    ota_text_h = font_small.size + 6
-    if ota_text:
-        updated_block_h += ota_text_h + 8
 
     weather_alert_lines = _prepare_weather_alert_lines(
         d,
@@ -447,7 +488,22 @@ def render_daily_schedule(
     if weather_alert_lines:
         weather_alert_block_h = weather_alert_header_h + (len(weather_alert_lines) * weather_alert_line_h) + 24
 
-    max_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - updated_block_h - weather_alert_block_h
+    # Birthdays after tomorrow get a line of their own, kept clear of the
+    # schedule above it, so a busy day can't push them off the panel.
+    upcoming_lines = _upcoming_birthday_lines(
+        d, upcoming_birthdays or [], tz, font_upcoming, canvas_w - (2 * padding)
+    )
+    upcoming_line_h = font_upcoming.size + 8
+    upcoming_block_h = (16 + len(upcoming_lines) * upcoming_line_h + 12) if upcoming_lines else 0
+
+    max_y = (
+        canvas_h
+        - padding
+        - (banner_h if show_sleep_banner else 0)
+        - updated_block_h
+        - weather_alert_block_h
+        - upcoming_block_h
+    )
 
     # Reminders (Google Tasks) render in their own region above the schedule,
     # kept separate from all-day calendar events.
@@ -765,26 +821,30 @@ def render_daily_schedule(
             d.text((padding + 12, line_start_y), line, fill="black", font=font_small)
             line_start_y += weather_alert_line_h
 
+    if upcoming_lines:
+        upcoming_top = alert_bottom_y - weather_alert_block_h - upcoming_block_h
+        d.line((padding, upcoming_top, canvas_w - padding, upcoming_top), fill="black", width=1)
+        line_y = upcoming_top + 16
+        for line in upcoming_lines:
+            d.text((padding, line_y), line, fill="black", font=font_upcoming)
+            line_y += upcoming_line_h
+
     updated_y = bottom_y - updated_text_h
-    ota_top_ref = updated_y
     if ups_text:
         ups_text_w = d.textlength(ups_text, font=font_small)
-        ups_right = wifi_left - 10
+        ups_right = status_icons_left - 10
         if ups_on_second_line:
             ups_x = padding
             ups_y = updated_y - ups_text_h - 8
-            ota_top_ref = ups_y
         else:
             ups_x = max(padding, ups_right - ups_text_w)
             ups_y = updated_y
         d.text((ups_x, ups_y), ups_text, fill="black", font=font_small)
     d.text((padding, updated_y), updated_text, fill="black", font=font_small)
-    if ota_text:
-        # Sits above the UPS/updated lines, in red so it stands out.
-        ota_y = ota_top_ref - ota_text_h - 8
-        d.text((padding, ota_y), ota_text, fill="red", font=font_small)
     usable_canvas_h = canvas_h - (banner_h if show_sleep_banner else 0)
     _draw_wifi_status(d, canvas_w, usable_canvas_h, padding, wifi_status, font_small)
+    if update_pending:
+        _draw_update_badge(d, canvas_w, usable_canvas_h, padding, font_small)
 
     if show_sleep_banner:
         y0 = canvas_h - padding - banner_h
@@ -874,13 +934,10 @@ def render_weekly_schedule(
     # a fixed stack of lines rather than dynamic side-by-side wrapping.
     banner_h = 70
     ups_text = _format_ups_status(ups_status)
-    ota_text = _format_update_status(update_pending)
     updated_text = f"Updated: {now_local.strftime('%-I:%M %p').lower()}"
     footer_line_h = font_small.size + 6
     footer_block_h = footer_line_h + 10
     if ups_text:
-        footer_block_h += footer_line_h
-    if ota_text:
         footer_block_h += footer_line_h
 
     weather_alert_lines = _prepare_weather_alert_lines(
@@ -958,9 +1015,6 @@ def render_weekly_schedule(
             line_start_y += weather_alert_line_h
 
     footer_y = bottom_y - footer_block_h + 10
-    if ota_text:
-        d.text((padding, footer_y), ota_text, fill="red", font=font_small)
-        footer_y += footer_line_h
     if ups_text:
         d.text((padding, footer_y), ups_text, fill="black", font=font_small)
         footer_y += footer_line_h
@@ -968,6 +1022,8 @@ def render_weekly_schedule(
 
     usable_canvas_h = canvas_h - (banner_h if show_sleep_banner else 0)
     _draw_wifi_status(d, canvas_w, usable_canvas_h, padding, wifi_status, font_small)
+    if update_pending:
+        _draw_update_badge(d, canvas_w, usable_canvas_h, padding, font_small)
 
     if show_sleep_banner:
         y0 = canvas_h - padding - banner_h
@@ -977,9 +1033,56 @@ def render_weekly_schedule(
     return img
 
 
-def _format_update_status(update_pending: bool) -> Optional[str]:
-    """Text for the OTA status line, or None when there's no update pending."""
-    return "Update pending" if update_pending else None
+# Space between the icons at the right-hand end of the status bar.
+_STATUS_ICON_GAP = 12
+
+
+def _status_icon_size(font: ImageFont.FreeTypeFont) -> int:
+    return max(18, int(font.size * 0.9))
+
+
+def _status_icons_left(canvas_w: int, padding: int, font: ImageFont.FreeTypeFont, update_pending: bool) -> float:
+    """Left edge of the icons at the right-hand end of the status bar."""
+    size = _status_icon_size(font)
+    left = canvas_w - padding - size
+    if update_pending:
+        left -= _STATUS_ICON_GAP + size
+    return left
+
+
+def _draw_update_badge(
+    draw: ImageDraw.ImageDraw,
+    canvas_w: int,
+    canvas_h: int,
+    padding: int,
+    font: ImageFont.FreeTypeFont,
+) -> None:
+    """An upward arrow in a hexagon, left of the WiFi icon: an update is waiting.
+
+    This used to say "Update pending" in red. It's there so whoever pushed the
+    update can see that the device has noticed it, but it hangs on the wall of
+    someone who can do nothing about it, and red reads as something wrong.
+    Drawn rather than typed: DejaVu has no glyph for it.
+    """
+    size = _status_icon_size(font)
+    r = size / 2
+    cx = canvas_w - padding - size - _STATUS_ICON_GAP - r
+    cy = canvas_h - padding - r
+    # Point at the top, like the arrow inside it.
+    hexagon = [
+        (cx + r * math.cos(math.radians(angle)), cy + r * math.sin(math.radians(angle)))
+        for angle in range(-90, 270, 60)
+    ]
+    draw.polygon(hexagon, outline="black", width=2)
+
+    head_base_y = cy + r * 0.02
+    head_half_w = r * 0.42
+    draw.polygon(
+        [(cx, cy - r * 0.55), (cx + head_half_w, head_base_y), (cx - head_half_w, head_base_y)],
+        fill="black",
+    )
+    shaft_half_w = max(1.0, r * 0.12)
+    draw.rectangle((cx - shaft_half_w, head_base_y, cx + shaft_half_w, cy + r * 0.5), fill="black")
 
 
 def _format_ups_status(ups_status: Optional[dict]) -> Optional[str]:
@@ -1028,7 +1131,7 @@ def _draw_wifi_status(
         return
 
     status = status.lower().strip()
-    icon_size = max(18, int(font.size * 0.9))
+    icon_size = _status_icon_size(font)
     right = canvas_w - padding
     bottom = canvas_h - padding
     left = right - icon_size

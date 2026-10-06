@@ -5,7 +5,7 @@ import json
 import os
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from typing import Callable, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -353,6 +353,32 @@ class _ViewEvents:
     today: List[Event]
     tomorrow: List[Event]
     week: List[Event]
+    # Birthdays after tomorrow, for the daily view's "Upcoming birthdays" line.
+    upcoming_birthdays: List[Event] = field(default_factory=list)
+
+
+def _upcoming_birthdays(events: List[Event], now: datetime, tz: ZoneInfo) -> List[Event]:
+    """The birthdays in `events` from the day after tomorrow on, soonest first.
+
+    Today's and tomorrow's already have a "Birthdays" row of their own on the
+    daily view; these are the ones still far enough off to post a card for.
+    Each is named the way that row names it ("Jane Doe", not "Jane Doe's
+    birthday"), and listed once however many calendars carry it.
+    """
+    first_day = now.astimezone(tz).date() + timedelta(days=2)
+    seen = set()
+    upcoming: List[Event] = []
+    for e in sorted(events, key=lambda e: (e.start, e.title.lower())):
+        if not e.birthday:
+            continue
+        day = e.start.astimezone(tz).date()
+        name = _birthday_label(e.title)
+        key = (day, name.lower())
+        if day < first_day or key in seen:
+            continue
+        seen.add(key)
+        upcoming.append(replace(e, title=name))
+    return upcoming
 
 
 def _split_for_views(raw_events: List[Event], now: datetime, tz: ZoneInfo) -> _ViewEvents:
@@ -367,6 +393,7 @@ def _split_for_views(raw_events: List[Event], now: datetime, tz: ZoneInfo) -> _V
         # the all-day merge the daily view applies (merging would collapse
         # all-day events from different days into a single row).
         week=_dedupe_events(raw_events),
+        upcoming_birthdays=_upcoming_birthdays(raw_events, now, tz),
     )
 
 
@@ -453,6 +480,7 @@ def _events_signature(
     update_pending: bool = False,
     view_mode: str = "daily",
     week_events: Optional[List[Event]] = None,
+    upcoming_birthdays: Optional[List[Event]] = None,
 ) -> str:
     # Only include fields that affect rendering. Weather and travel times are
     # left out: they're looked up only when a frame is drawn, weather changes
@@ -494,6 +522,7 @@ def _events_signature(
         "update_pending": update_pending,
         "view_mode": view_mode,
         "week_events": [_event_payload(e) for e in (week_events or [])],
+        "upcoming_birthdays": [_event_payload(e) for e in (upcoming_birthdays or [])],
     }
     b = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(b).hexdigest()
@@ -529,6 +558,7 @@ def _view_signature(view_mode: str, snap: _Snapshot, tz: ZoneInfo) -> str:
         snap.show_banner, snap.wifi_status, snap.ups_status, snap.reminders,
         update_pending=snap.update_pending,
         view_mode="daily",
+        upcoming_birthdays=snap.events.upcoming_birthdays,
     )
 
 
@@ -596,6 +626,7 @@ def _render_view(
         weather_alerts=snap.weather_alerts,
         reminders=snap.reminders,
         update_pending=snap.update_pending,
+        upcoming_birthdays=snap.events.upcoming_birthdays,
     )
 
 

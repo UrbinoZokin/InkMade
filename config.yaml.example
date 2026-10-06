@@ -51,8 +51,8 @@ weather:
   longitude: -112.3582
 
 # Over-the-air updates. When enabled, the display checks GitHub on every refresh
-# and shows "Update pending" in the bottom status bar (by the WiFi icon) when
-# this checkout is behind the tracked branch. The inkycal-update systemd timer
+# shows a small black hexagon with an upward arrow in the bottom status bar
+# (just left of the WiFi icon) when this checkout is behind the tracked branch. The inkycal-update systemd timer
 # then pulls and applies the update — by default only during the overnight sleep
 # window, so it never disrupts daytime viewing. Set enabled: false to freeze the
 # installed version, or apply_window: anytime to apply updates as soon as found.
@@ -65,12 +65,15 @@ auto_update:
 #   A (pin_view)    - toggle between the daily view and a weekly view
 #                     (next 7 days, event names only, no times)
 #   B (pin_refresh) - force an immediate display refresh
-#   C (pin_setup)   - turn on setup mode for 10 minutes: the screen shows a
-#                     one-time code, and the companion app can change the
-#                     WiFi network or Google account (C again: 10 more
-#                     minutes; A, B or D: back to the calendar)
-#   D (pin_update)  - force an OTA update check, and apply it right away
-#                     if one is pending (bypasses apply_window)
+#   C (pin_setup)   - hold 3 seconds: turn on setup mode for 10 minutes: the
+#                     screen shows a one-time code, and the companion app can
+#                     change the WiFi network or Google account (hold C
+#                     again: 10 more minutes; tap A, B or D: back to the
+#                     calendar)
+#   D (pin_update)  - hold 3 seconds: force an OTA update check, and apply
+#                     it right away if one is pending (bypasses apply_window)
+# C and D ignore a tap, so a stray press can't replace the calendar with a
+# setup code or an update notice.
 # Pin numbers are BCM GPIO numbers. The defaults below match the 13.3"
 # Inky Impression; button C is wired to GPIO25 on that model instead of
 # the GPIO16 used on the smaller 4"/5.7"/7.3" sizes.

@@ -7,7 +7,7 @@ exchange failing to open(). That is what counts as a guess here, and each
 exchange gets exactly one. Six digits are only safe because guessing is
 capped: after MAX_WRONG_CODES the session ends, so anyone guessing gets 5
 tries in a million before they'd need the device in front of them again to
-press C.
+hold C.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import time
 from collections import OrderedDict
 from typing import Callable, Optional, Tuple
 
-from ..setupmode import SESSION_MINUTES
+from ..setupmode import HOLD_SECONDS, SESSION_MINUTES
 from .setupcrypto import BadSeal, Channel, pi_handshake
 
 CODE_DIGITS = 6
@@ -108,7 +108,7 @@ class SetupSession:
         return OK, plaintext, channel
 
     def extend(self) -> bool:
-        """Restart the clock (another press of button C). False once the session is over."""
+        """Restart the clock (another hold of button C). False once the session is over."""
         with self._lock:
             if self._ended():
                 return False
@@ -159,6 +159,6 @@ def refusal(verdict: str, session: SetupSession) -> str:
     if session.end_reason == "too many wrong setup codes":
         return (
             "Too many wrong setup codes, so setup mode has ended. "
-            "Press button C on the InkyCal to start again with a new code."
+            f"Hold down button C on the InkyCal for {HOLD_SECONDS} seconds to start again with a new code."
         )
-    return "Setup mode has ended. Press button C on the InkyCal to turn it back on."
+    return f"Setup mode has ended. Hold down button C on the InkyCal for {HOLD_SECONDS} seconds to turn it back on."

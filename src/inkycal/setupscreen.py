@@ -23,6 +23,7 @@ from .display_inky import show_on_inky
 from .feedback import _fitted_font
 from .provisioning.protocol import BLE_LOCAL_NAME
 from .render import _load_bold_font, _load_font, _wrap_text
+from .setupmode import HOLD_SECONDS
 from .state import STATE_PATH_DEFAULT, invalidate_render_hash
 
 # The layout is drawn for the 13.3" panel's 1200 px width and scaled from there.
@@ -56,7 +57,8 @@ def render_setup_screen(
     shown_code = format_code(code)
     footer = (
         f"Setup mode switches itself off after {minutes} minutes. "
-        f"Press C for {minutes} more minutes, or A, B or D to go back to the calendar."
+        f"To keep it on {minutes} more minutes, hold C down for {HOLD_SECONDS} seconds. "
+        "Press A, B or D to go back to the calendar."
     )
     # (lines, font, space after the paragraph at design scale)
     paragraphs: List[Tuple[List[str], ImageFont.FreeTypeFont, int]] = [
