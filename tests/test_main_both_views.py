@@ -91,7 +91,8 @@ def _event(title: str, hour: int, day_offset: int = 0, location: str | None = No
 
 def test_one_calendar_fetch_serves_both_views(paths, panel, monkeypatch):
     # The daily view used to fetch today and tomorrow separately, and the
-    # weekly view the whole week again; today and tomorrow are inside it.
+    # weekly view the whole week again; today and tomorrow are inside it, and
+    # the week is inside the two weeks the upcoming-birthdays line looks at.
     fetches = []
     monkeypatch.setattr(
         main, "_fetch_raw_events", lambda _cfg, start, end, _tz: fetches.append((start, end)) or []
@@ -103,7 +104,7 @@ def test_one_calendar_fetch_serves_both_views(paths, panel, monkeypatch):
     assert len(fetches) == 1
     start, end = fetches[0]
     assert start == datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0)
-    assert end - start == timedelta(days=7)
+    assert end - start == timedelta(days=main.BIRTHDAY_LOOKAHEAD_DAYS) == timedelta(days=14)
 
 
 def test_both_views_are_left_saved(paths, calendar, panel):

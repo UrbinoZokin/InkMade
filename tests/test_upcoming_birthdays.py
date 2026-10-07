@@ -1,11 +1,12 @@
-"""The daily view's "Upcoming birthdays" line: the rest of the week's birthdays,
-early enough to post a card, taken from the week the device already fetches."""
+"""The daily view's "Upcoming birthdays" line: the next two weeks' birthdays,
+early enough to post a card, taken from the same fetch as everything else."""
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageDraw
 
-from inkycal.main import _split_for_views, _view_signature, _Snapshot
+from inkycal import main
+from inkycal.main import _fetch_view_events, _split_for_views, _view_signature, _Snapshot
 from inkycal.models import Event
 from inkycal.render import _load_font, _upcoming_birthday_lines, render_daily_schedule
 
@@ -34,6 +35,34 @@ def test_lists_the_birthdays_after_tomorrow_soonest_first():
 
     # Today's and tomorrow's have their own "Birthdays" rows already.
     assert _upcoming(raw) == [("Emma Segal", "Fri"), ("Tom Hart", "Sun"), ("Grandma Rose", "Mon")]
+
+
+def test_looks_two_weeks_ahead():
+    raw = [_birthday(10, "Tom Hart's birthday"), _birthday(13, "Grandma Rose's birthday"), _birthday(14, "Too Far's birthday")]
+
+    assert [title for title, _day in _upcoming(raw)] == ["Tom Hart", "Grandma Rose"]
+
+
+def test_one_fetch_covers_the_two_weeks(monkeypatch):
+    asked = []
+    monkeypatch.setattr(main, "_fetch_raw_events", lambda cfg, start, end, tz: asked.append((start, end)) or [])
+
+    _fetch_view_events(None, NOW, TZ)
+
+    assert asked == [(MIDNIGHT, MIDNIGHT + timedelta(days=14))]
+
+
+def test_the_weekly_view_still_covers_seven_days():
+    """The fetch runs into next week for the birthdays; the weekly view must
+    not take those events in, or a change next week would repaint it."""
+    this_week = Event(source="google", title="Bridge club", start=MIDNIGHT + timedelta(days=6, hours=14),
+                      end=MIDNIGHT + timedelta(days=6, hours=16))
+    next_week = Event(source="google", title="Dentist", start=MIDNIGHT + timedelta(days=8, hours=9),
+                      end=MIDNIGHT + timedelta(days=8, hours=10))
+
+    week = _split_for_views([this_week, next_week], NOW, TZ).week
+
+    assert [e.title for e in week] == ["Bridge club"]
 
 
 def test_a_birthday_on_two_calendars_is_listed_once():
@@ -85,6 +114,16 @@ def test_the_daily_view_shows_the_line(monkeypatch):
     assert "Upcoming birthdays: Emma Segal (Fri)" in _written_by_daily_view(monkeypatch, upcoming)
 
 
+def test_next_weeks_birthdays_are_dated_since_their_weekday_comes_round_twice(monkeypatch):
+    raw = [_birthday(6, "Emma Segal's birthday"), _birthday(7, "Tom Hart's birthday"), _birthday(10, "Grandma Rose's birthday")]
+    upcoming = _split_for_views(raw, NOW, TZ).upcoming_birthdays
+
+    shown = " ".join(_written_by_daily_view(monkeypatch, upcoming))
+
+    for entry in ("Emma Segal (Mon)", "Tom Hart (Oct 13)", "Grandma Rose (Oct 16)"):
+        assert entry in shown
+
+
 def test_no_line_without_upcoming_birthdays(monkeypatch):
     assert not any("Upcoming" in t for t in _written_by_daily_view(monkeypatch, []))
 
@@ -92,7 +131,7 @@ def test_no_line_without_upcoming_birthdays(monkeypatch):
 def _lines(names, width=1120):
     draw = ImageDraw.Draw(Image.new("RGB", (1200, 100)))
     birthdays = [_birthday(2 + i % 5, name) for i, name in enumerate(names)]
-    return _upcoming_birthday_lines(draw, birthdays, TZ, _load_font(34), width)
+    return _upcoming_birthday_lines(draw, birthdays, TZ, NOW.date(), _load_font(34), width)
 
 
 def test_lines_break_between_people_not_inside_one():

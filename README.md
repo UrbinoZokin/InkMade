@@ -15,7 +15,7 @@ PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather
 - Google Calendar + Apple iCloud (CalDAV) sync  
 - Google Tasks shown as a separate “Reminders” region (due today + overdue)  
 - Contact birthdays from Google's Contacts calendar, grouped on their own row  
-- The rest of the week's birthdays listed as “Upcoming birthdays”, early enough to post a card  
+- The next two weeks' birthdays listed as “Upcoming birthdays”, early enough to post a card  
 - Sorted by start time (all-day events first)  
 - Portrait layout for 13.3" display  
 - Updates every 15 minutes  
@@ -418,11 +418,13 @@ The Pi runs headless, so the OAuth consent flow happens on another machine.
 > (`addressbook#contacts@group.v.calendar.google.com`), which is not part of
 > `primary`. InkyCal adds it automatically — it needs no OAuth scope beyond the
 > `calendar.readonly` the token already has — and the day's birthdays render as
-> their own “Birthdays: …” row. The rest of the week's (from the day after
-> tomorrow) are listed near the bottom of the daily view as “Upcoming
-> birthdays: Emma (Fri) • Tom (Sun)”, early enough to post a card; they come
-> out of the week the display already fetches for the weekly view, so this
-> costs no extra requests. Turn it all off with
+> their own “Birthdays: …” row, as do tomorrow's in the “Tomorrow” section.
+> The rest of the next two weeks' are listed near the bottom of the daily view
+> as “Upcoming birthdays: Emma (Fri) • Tom (Oct 16)” — a weekday within the
+> coming week, a date after that — early enough to post a card. They come out
+> of the same fetch as everything else, which covers two weeks for this (the
+> weekly view still shows seven days), so this costs no extra requests. Turn it
+> all off with
 > `calendars.google.birthdays_enabled: false`. Apple does **not** publish the
 > equivalent iCloud Contacts birthday calendar over CalDAV (it is generated
 > on-device), so iCloud birthdays only appear if you keep them in a real

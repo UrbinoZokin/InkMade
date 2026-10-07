@@ -282,15 +282,23 @@ def _prepare_weather_alert_lines(
     return lines
 
 
+def _upcoming_birthday_day(day: date, today: date) -> str:
+    """The weekday ("Fri") within the coming week; after it, when "Fri" could mean two days, the date ("Oct 16")."""
+    if (day - today).days < 7:
+        return day.strftime("%a")
+    return day.strftime("%b %-d")
+
+
 def _upcoming_birthday_lines(
     draw: ImageDraw.ImageDraw,
     birthdays: List[Event],
     tz: ZoneInfo,
+    today: date,
     font: ImageFont.FreeTypeFont,
     max_width: float,
     max_lines: int = 2,
 ) -> List[str]:
-    """The line "Upcoming birthdays: Jane Doe (Sat) • Tom (Mon)", wrapped to at most `max_lines`.
+    """The line "Upcoming birthdays: Jane Doe (Sat) • Tom (Oct 16)", wrapped to at most `max_lines`.
 
     Lines break between people, never inside one, so a name stays with its
     day and no line ends on a dangling "•". Names that don't fit are counted
@@ -298,7 +306,9 @@ def _upcoming_birthday_lines(
     """
     if not birthdays:
         return []
-    entries = [f"{e.title} ({e.start.astimezone(tz).strftime('%a')})" for e in birthdays]
+    entries = [
+        f"{e.title} ({_upcoming_birthday_day(e.start.astimezone(tz).date(), today)})" for e in birthdays
+    ]
 
     def wrap(parts: List[str]) -> List[str]:
         lines = ["Upcoming birthdays:"]
@@ -491,7 +501,7 @@ def render_daily_schedule(
     # Birthdays after tomorrow get a line of their own, kept clear of the
     # schedule above it, so a busy day can't push them off the panel.
     upcoming_lines = _upcoming_birthday_lines(
-        d, upcoming_birthdays or [], tz, font_upcoming, canvas_w - (2 * padding)
+        d, upcoming_birthdays or [], tz, now.astimezone(tz).date(), font_upcoming, canvas_w - (2 * padding)
     )
     upcoming_line_h = font_upcoming.size + 8
     upcoming_block_h = (16 + len(upcoming_lines) * upcoming_line_h + 12) if upcoming_lines else 0

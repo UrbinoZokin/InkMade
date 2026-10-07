@@ -78,6 +78,12 @@ def _week_range(now: datetime, tz: ZoneInfo, days: int = 7):
     return day_start, day_start + timedelta(days=days)
 
 
+# How far ahead the daily view's "Upcoming birthdays" line looks, counting
+# today: two weeks gives time to get a card in the post. It's also how far
+# ahead every run fetches, since the weekly view's seven days fall inside it.
+BIRTHDAY_LOOKAHEAD_DAYS = 14
+
+
 def _normalize_text(value: str | None) -> str:
     if not value:
         return ""
@@ -353,19 +359,23 @@ class _ViewEvents:
     today: List[Event]
     tomorrow: List[Event]
     week: List[Event]
-    # Birthdays after tomorrow, for the daily view's "Upcoming birthdays" line.
+    # Birthdays from the day after tomorrow to BIRTHDAY_LOOKAHEAD_DAYS out,
+    # for the daily view's "Upcoming birthdays" line.
     upcoming_birthdays: List[Event] = field(default_factory=list)
 
 
 def _upcoming_birthdays(events: List[Event], now: datetime, tz: ZoneInfo) -> List[Event]:
-    """The birthdays in `events` from the day after tomorrow on, soonest first.
+    """The birthdays in `events` from the day after tomorrow to
+    BIRTHDAY_LOOKAHEAD_DAYS out, soonest first.
 
     Today's and tomorrow's already have a "Birthdays" row of their own on the
     daily view; these are the ones still far enough off to post a card for.
     Each is named the way that row names it ("Jane Doe", not "Jane Doe's
     birthday"), and listed once however many calendars carry it.
     """
-    first_day = now.astimezone(tz).date() + timedelta(days=2)
+    today = now.astimezone(tz).date()
+    first_day = today + timedelta(days=2)
+    end_day = today + timedelta(days=BIRTHDAY_LOOKAHEAD_DAYS)
     seen = set()
     upcoming: List[Event] = []
     for e in sorted(events, key=lambda e: (e.start, e.title.lower())):
@@ -374,7 +384,7 @@ def _upcoming_birthdays(events: List[Event], now: datetime, tz: ZoneInfo) -> Lis
         day = e.start.astimezone(tz).date()
         name = _birthday_label(e.title)
         key = (day, name.lower())
-        if day < first_day or key in seen:
+        if not first_day <= day < end_day or key in seen:
             continue
         seen.add(key)
         upcoming.append(replace(e, title=name))
@@ -391,19 +401,22 @@ def _split_for_views(raw_events: List[Event], now: datetime, tz: ZoneInfo) -> _V
         ),
         # The weekly view only lists event names grouped by day, so it skips
         # the all-day merge the daily view applies (merging would collapse
-        # all-day events from different days into a single row).
-        week=_dedupe_events(raw_events),
+        # all-day events from different days into a single row). The fetch
+        # runs past its seven days for the birthdays; what's beyond them is
+        # cut here, or a change next week would repaint this week's view.
+        week=_dedupe_events(clip_events_to_range(raw_events, *_week_range(now, tz), tz)),
         upcoming_birthdays=_upcoming_birthdays(raw_events, now, tz),
     )
 
 
 def _fetch_view_events(cfg, now: datetime, tz: ZoneInfo) -> _ViewEvents:
-    # Today and tomorrow are the first two of the weekly view's seven days, so
-    # one fetch of the week feeds both views. A backend takes the same round
-    # trips to answer for seven days as for one, and this replaces the separate
-    # today and tomorrow fetches the daily view used to make on its own.
-    week_start, week_end = _week_range(now, tz)
-    return _split_for_views(_fetch_raw_events(cfg, week_start, week_end, tz), now, tz)
+    # Today, tomorrow and the weekly view's seven days all fall within the
+    # birthday lookahead, so one fetch of that span feeds both views. A backend
+    # takes the same round trips to answer for two weeks as for one day, and
+    # this replaces the separate today and tomorrow fetches the daily view used
+    # to make on its own.
+    fetch_start, fetch_end = _week_range(now, tz, days=BIRTHDAY_LOOKAHEAD_DAYS)
+    return _split_for_views(_fetch_raw_events(cfg, fetch_start, fetch_end, tz), now, tz)
 
 
 def _reminder_sort_key(r: Reminder):
