@@ -63,7 +63,8 @@ auto_update:
 
 # The Inky Impression's 4 built-in buttons (labeled A/B/C/D on the board):
 #   A (pin_view)    - toggle between the daily view and a weekly view
-#                     (next 7 days, event names only, no times)
+#                     (next 7 days, event names only, no times, each day
+#                     with its high/low and any rain or snow)
 #   B (pin_refresh) - force an immediate display refresh
 #   C (pin_setup)   - hold 3 seconds: turn on setup mode for 10 minutes: the
 #                     screen shows a one-time code, and the companion app can

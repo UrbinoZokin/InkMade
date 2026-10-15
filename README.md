@@ -16,6 +16,7 @@ PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather
 - Google Tasks shown as a separate “Reminders” region (due today + overdue)  
 - Contact birthdays from Google's Contacts calendar, grouped on their own row  
 - The next two weeks' birthdays listed as “Upcoming birthdays”, early enough to post a card  
+- Weekly view: all 7 days always on screen, each with its high/low and any rain or snow expected  
 - Sorted by start time (all-day events first)  
 - Portrait layout for 13.3" display  
 - Updates every 15 minutes  
@@ -43,7 +44,7 @@ wired up as follows:
 
 | Button | Function |
 | --- | --- |
-| A | Toggle between the daily view (default) and a weekly view showing the next 7 days' event names (no times) |
+| A | Toggle between the daily view (default) and a weekly view showing the next 7 days' event names (no times), each day with its high/low and any rain or snow |
 | B | Force an immediate display refresh |
 | C | **Hold for 3 seconds:** turn on setup mode for 10 minutes, so the companion app can change the WiFi network or Google account (see *Setup mode* below) |
 | D | **Hold for 3 seconds:** force an OTA update check, applying it right away if one is pending (bypasses the overnight `apply_window`) |
@@ -71,6 +72,14 @@ of the hidden one next to `state.json` (`frame_daily.png`,
 and tomorrow are the first two of the weekly view's seven days — so this adds
 no network round trips; the hidden view is only redrawn when its content
 changes, or once its copy is 40 minutes old.
+
+The weekly view always shows all seven days. It uses the largest type that
+fits the whole week; on a week too busy even for the smallest, the busiest
+days show their first events and count the rest (“+3 more”) rather than any
+day dropping off the bottom. Each day's name has its forecast beside it — the
+high and low, and “Rain 60%” or “Snow” on a day where it's expected (at a
+30% chance or more) — from the same forecast download as the daily view's
+per-event weather.
 
 So button A normally skips the fetch entirely: the saved copy of the other
 view goes straight up, and the panel starts refreshing a few seconds after
@@ -421,7 +430,9 @@ The Pi runs headless, so the OAuth consent flow happens on another machine.
 > their own “Birthdays: …” row, as do tomorrow's in the “Tomorrow” section.
 > The rest of the next two weeks' are listed near the bottom of the daily view
 > as “Upcoming birthdays: Emma (Fri) • Tom (Oct 16)” — a weekday within the
-> coming week, a date after that — early enough to post a card. They come out
+> coming week, a date after that — early enough to post a card. The type
+> shrinks to keep everyone on two lines; a fortnight too full even for the
+> smallest readable size adds lines rather than hiding anyone. They come out
 > of the same fetch as everything else, which covers two weeks for this (the
 > weekly view still shows seven days), so this costs no extra requests. Turn it
 > all off with

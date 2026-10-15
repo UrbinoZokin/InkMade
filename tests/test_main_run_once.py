@@ -59,6 +59,9 @@ class _NoWeather:
     def forecast_for_event_start(self, _start):
         return None
 
+    def daily_forecasts(self):
+        return {}
+
 
 def _render_daily(**kw) -> Image.Image:
     img = Image.new("RGB", (60, 80), "white")

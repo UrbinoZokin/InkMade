@@ -55,6 +55,9 @@ class _NoWeather:
     def forecast_for_event_start(self, _start):
         return None
 
+    def daily_forecasts(self):
+        return {}
+
 
 @pytest.fixture
 def paths(tmp_path):
@@ -239,3 +242,38 @@ def test_weather_and_travel_are_looked_up_only_for_a_frame_being_drawn(paths, ca
     main.run_once(config_path=config_path, state_path=state_path)
     assert lookups == []
     assert len(panel) == 1
+
+
+def test_the_weekly_view_is_drawn_with_each_days_forecast(paths, calendar, panel, monkeypatch):
+    forecast = {datetime.now(TZ).date(): object()}
+    received = []
+
+    class Forecasting(_NoWeather):
+        def daily_forecasts(self):
+            return forecast
+
+    def weekly(**kwargs):
+        received.append(kwargs["day_forecasts"])
+        return Image.new("RGB", (kwargs["canvas_w"], kwargs["canvas_h"]), "white")
+
+    monkeypatch.setattr(main, "WeatherForecastResolver", Forecasting)
+    monkeypatch.setattr(main, "render_weekly_schedule", weekly)
+    config_path, state_path = paths()
+
+    main.run_once(config_path=config_path, state_path=state_path)
+
+    assert received == [forecast]
+
+
+def test_a_failed_forecast_still_leaves_the_weekly_view_drawn(paths, calendar, panel, monkeypatch, capsys):
+    class Unreachable(_NoWeather):
+        def daily_forecasts(self):
+            raise OSError("timed out")
+
+    monkeypatch.setattr(main, "WeatherForecastResolver", Unreachable)
+    config_path, state_path = paths()
+
+    main.run_once(config_path=config_path, state_path=state_path)
+
+    assert frames.read_frame_info(state_path, "weekly") is not None
+    assert "drawing the week without it" in capsys.readouterr().out

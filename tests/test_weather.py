@@ -307,3 +307,62 @@ def test_apply_weather_forecast_uses_the_resolver_it_is_given(monkeypatch):
     )
 
     assert processed[0].weather_text == "72°F"
+
+
+def _daily_payload(**overrides):
+    daily = {
+        "time": ["2026-10-15", "2026-10-16", "2026-10-17", "2026-10-18"],
+        "temperature_2m_max": [91.6, 61.2, 30.4, None],
+        "temperature_2m_min": [67.5, 44.8, 17.9, 50.0],
+        "weather_code": [0, 63, 73, 61],
+        "precipitation_probability_max": [0, 60, None, 80],
+    }
+    daily.update(overrides)
+    return {"hourly": {"time": [], "temperature_2m": [], "weather_code": []}, "daily": daily}
+
+
+def test_daily_forecasts_give_each_days_high_low_and_rain_or_snow(monkeypatch):
+    from datetime import date
+
+    from inkycal.weather import DayForecast
+
+    requests = []
+    monkeypatch.setattr(
+        "inkycal.weather.urlopen", lambda url, **_kw: requests.append(url) or _JsonResponse(_daily_payload())
+    )
+
+    days = WeatherForecastResolver("America/Phoenix", 33.4, -112.3).daily_forecasts()
+
+    assert days == {
+        date(2026, 10, 15): DayForecast(high_f=92, low_f=68, icon="☀"),
+        date(2026, 10, 16): DayForecast(high_f=61, low_f=45, icon="☔", precipitation="Rain", precipitation_chance=60),
+        # No chance given: the forecast's snow is shown without one.
+        date(2026, 10, 17): DayForecast(high_f=30, low_f=18, icon="❄", precipitation="Snow"),
+        # The 18th has no high, so it's left out rather than guessed at.
+    }
+    assert "forecast_days=7" in requests[0] and "daily=" in requests[0]
+
+
+def test_a_stray_shower_at_a_low_chance_does_not_make_a_rain_day(monkeypatch):
+    payload = _daily_payload(weather_code=[61, 61, 61, 61], precipitation_probability_max=[10, 29, 30, 95])
+    monkeypatch.setattr("inkycal.weather.urlopen", lambda url, **_kw: _JsonResponse(payload))
+
+    days = WeatherForecastResolver("America/Phoenix", 33.4, -112.3).daily_forecasts()
+
+    assert [d.precipitation for d in days.values()] == [None, None, "Rain"]
+
+
+def test_the_weekly_and_daily_views_share_one_forecast_download(monkeypatch):
+    tz = ZoneInfo("America/Phoenix")
+    payload = _daily_payload()
+    payload["hourly"] = {"time": ["2026-10-15T09:00"], "temperature_2m": [80.0], "weather_code": [0]}
+    requests = []
+    monkeypatch.setattr(
+        "inkycal.weather.urlopen", lambda url, **_kw: requests.append(url) or _JsonResponse(payload)
+    )
+    resolver = WeatherForecastResolver("America/Phoenix", 33.4, -112.3)
+
+    resolver.daily_forecasts()
+    resolver.forecast_for_datetime(datetime(2026, 10, 15, 9, 15, tzinfo=tz))
+
+    assert len(requests) == 1

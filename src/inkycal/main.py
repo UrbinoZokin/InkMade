@@ -583,6 +583,13 @@ def _render_view(
     weather_resolver: WeatherForecastResolver,
 ) -> Image.Image:
     if view_mode == "weekly":
+        # Each day's high, low and any rain or snow, from the same download
+        # as the daily view's per-event weather.
+        try:
+            day_forecasts = weather_resolver.daily_forecasts()
+        except Exception as e:
+            print(f"Weather forecast lookup failed; drawing the week without it. Error: {e}")
+            day_forecasts = {}
         return render_weekly_schedule(
             canvas_w=cfg.display.width,
             canvas_h=cfg.display.height,
@@ -595,6 +602,7 @@ def _render_view(
             ups_status=snap.ups_status,
             weather_alerts=snap.weather_alerts,
             update_pending=snap.update_pending,
+            day_forecasts=day_forecasts,
         )
 
     # Travel times and weather are looked up here, for a frame that's actually

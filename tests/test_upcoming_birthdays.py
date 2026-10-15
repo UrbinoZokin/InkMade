@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw
 from inkycal import main
 from inkycal.main import _fetch_view_events, _split_for_views, _view_signature, _Snapshot
 from inkycal.models import Event
-from inkycal.render import _load_font, _upcoming_birthday_lines, render_daily_schedule
+from inkycal.render import _upcoming_birthday_lines, render_daily_schedule
 
 TZ = ZoneInfo("America/Phoenix")
 NOW = datetime(2026, 10, 6, 8, 0, tzinfo=TZ)  # a Tuesday
@@ -128,10 +128,14 @@ def test_no_line_without_upcoming_birthdays(monkeypatch):
     assert not any("Upcoming" in t for t in _written_by_daily_view(monkeypatch, []))
 
 
-def _lines(names, width=1120):
+def _lines_and_font(names, width=1120):
     draw = ImageDraw.Draw(Image.new("RGB", (1200, 100)))
-    birthdays = [_birthday(2 + i % 5, name) for i, name in enumerate(names)]
-    return _upcoming_birthday_lines(draw, birthdays, TZ, NOW.date(), _load_font(34), width)
+    birthdays = [_birthday(2 + i % 12, name) for i, name in enumerate(names)]
+    return _upcoming_birthday_lines(draw, birthdays, TZ, NOW.date(), width)
+
+
+def _lines(names, width=1120):
+    return _lines_and_font(names, width)[0]
 
 
 def test_lines_break_between_people_not_inside_one():
@@ -143,12 +147,45 @@ def test_lines_break_between_people_not_inside_one():
         assert any(entry in line for line in lines)
 
 
-def test_names_that_do_not_fit_in_two_lines_are_counted():
+def test_a_few_birthdays_get_the_full_size_type():
+    lines, font = _lines_and_font(["Emma Segal", "Tom Hart"])
+
+    assert font.size == 34
+    assert len(lines) == 1
+
+
+def test_a_busier_fortnight_shrinks_the_type_to_keep_to_two_lines():
     names = ["Emma Segal", "Tom Hart", "Grandma Rose", "Cousin Bartholomew", "Aunt Philippa", "Little Timmy"]
 
-    lines = _lines(names)
+    lines, font = _lines_and_font(names)
 
     assert len(lines) == 2
-    assert lines[-1].endswith("more")
-    shown = sum(name in " ".join(lines) for name in names)
-    assert f"+{len(names) - shown} more" in lines[-1]
+    assert 24 <= font.size < 34
+    shown = " ".join(lines)
+    assert all(name in shown for name in names)
+
+
+def test_a_fortnight_too_full_for_two_lines_adds_lines_rather_than_hiding_anyone():
+    names = [
+        "Emma Segal", "Tom Hart", "Grandma Rose", "Cousin Bartholomew", "Aunt Philippa",
+        "Little Timmy", "Uncle Ray", "Dana Lee", "Mike Segal", "Pat Quinn", "Lou Reyes",
+    ]
+
+    lines, font = _lines_and_font(names)
+
+    assert font.size == 24, "the smallest readable size, before taking more lines"
+    assert 2 < len(lines) <= 4
+    shown = " ".join(lines)
+    assert all(name in shown for name in names)
+    assert "more" not in shown
+
+
+def test_only_an_extreme_fortnight_counts_some_as_more():
+    names = [f"Contact Number {i}" for i in range(30)]
+
+    lines, font = _lines_and_font(names)
+
+    assert font.size == 24
+    assert len(lines) == 4
+    shown = sum(f"{name} (" in " ".join(lines) for name in names)
+    assert lines[-1].endswith(f"+{len(names) - shown} more")

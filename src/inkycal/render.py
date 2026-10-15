@@ -1,12 +1,12 @@
 from __future__ import annotations
 import math
 from datetime import date, datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 from PIL import Image, ImageDraw, ImageFont
 
 from .models import Event, Reminder
-from .weather import WeatherAlert
+from .weather import DayForecast, WeatherAlert
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont:
     # DejaVu is commonly available on Raspberry Pi; install via apt in scripts/install.sh
@@ -289,28 +289,37 @@ def _upcoming_birthday_day(day: date, today: date) -> str:
     return day.strftime("%b %-d")
 
 
+# Type sizes for the "Upcoming birthdays" line, largest first. It shrinks until
+# every birthday in the fortnight fits on two lines at the bottom of the daily
+# view. Below the smallest it would stop being readable from across a room, so
+# a fortnight too full for that adds lines instead, up to the most below.
+_UPCOMING_BIRTHDAY_SIZES = (34, 31, 28, 26, 24)
+_UPCOMING_BIRTHDAY_MAX_LINES = 4
+
+
 def _upcoming_birthday_lines(
     draw: ImageDraw.ImageDraw,
     birthdays: List[Event],
     tz: ZoneInfo,
     today: date,
-    font: ImageFont.FreeTypeFont,
     max_width: float,
-    max_lines: int = 2,
-) -> List[str]:
-    """The line "Upcoming birthdays: Jane Doe (Sat) • Tom (Oct 16)", wrapped to at most `max_lines`.
+) -> Tuple[List[str], ImageFont.FreeTypeFont]:
+    """The line "Upcoming birthdays: Jane Doe (Sat) • Tom (Oct 16)", wrapped, and its font.
 
-    Lines break between people, never inside one, so a name stays with its
-    day and no line ends on a dangling "•". Names that don't fit are counted
-    at the end ("+2 more") rather than dropped without a word.
+    The largest size in _UPCOMING_BIRTHDAY_SIZES that fits everyone on two
+    lines. A fortnight too full even for the smallest takes more lines at that
+    size; only one too full for _UPCOMING_BIRTHDAY_MAX_LINES counts the
+    furthest-off as "+N more" rather than showing them. Lines break between
+    people, never inside one, so a name stays with its day and no line ends on
+    a dangling "•".
     """
     if not birthdays:
-        return []
+        return [], _load_font(_UPCOMING_BIRTHDAY_SIZES[0])
     entries = [
         f"{e.title} ({_upcoming_birthday_day(e.start.astimezone(tz).date(), today)})" for e in birthdays
     ]
 
-    def wrap(parts: List[str]) -> List[str]:
+    def wrap(parts: List[str], font: ImageFont.FreeTypeFont) -> List[str]:
         lines = ["Upcoming birthdays:"]
         line_has_entry = False
         for part in parts:
@@ -326,15 +335,20 @@ def _upcoming_birthday_lines(
             line_has_entry = True
         return lines
 
-    lines: List[str] = []
+    for size in _UPCOMING_BIRTHDAY_SIZES:
+        font = _load_font(size)
+        lines = wrap(entries, font)
+        if len(lines) <= 2:
+            return lines, font
+
     for shown in range(len(entries), 0, -1):
         parts = entries[:shown]
         if shown < len(entries):
             parts.append(f"+{len(entries) - shown} more")
-        lines = wrap(parts)
-        if len(lines) <= max_lines:
-            return lines
-    return lines[:max_lines]
+        lines = wrap(parts, font)
+        if len(lines) <= _UPCOMING_BIRTHDAY_MAX_LINES:
+            return lines, font
+    return lines[:_UPCOMING_BIRTHDAY_MAX_LINES], font
 
 def _draw_reminders_region(
     draw: ImageDraw.ImageDraw,
@@ -430,7 +444,6 @@ def render_daily_schedule(
     font_tomorrow_weather_bold = _load_bold_font(36)
     font_reminder_header = _load_bold_font(40)
     font_reminder = _load_font(38)
-    font_upcoming = _load_font(34)
 
     padding = 40
     y = padding
@@ -500,8 +513,8 @@ def render_daily_schedule(
 
     # Birthdays after tomorrow get a line of their own, kept clear of the
     # schedule above it, so a busy day can't push them off the panel.
-    upcoming_lines = _upcoming_birthday_lines(
-        d, upcoming_birthdays or [], tz, now.astimezone(tz).date(), font_upcoming, canvas_w - (2 * padding)
+    upcoming_lines, font_upcoming = _upcoming_birthday_lines(
+        d, upcoming_birthdays or [], tz, now.astimezone(tz).date(), canvas_w - (2 * padding)
     )
     upcoming_line_h = font_upcoming.size + 8
     upcoming_block_h = (16 + len(upcoming_lines) * upcoming_line_h + 12) if upcoming_lines else 0
@@ -864,11 +877,157 @@ def render_daily_schedule(
     return img
 
 
-def _weekday_header_label(day: date, today: date) -> str:
-    label = day.strftime("%A, %B %-d")
+def _weekday_header_label(day: date, today: date, short_month: bool = False) -> str:
+    label = day.strftime("%A, %b %-d" if short_month else "%A, %B %-d")
     if day == today:
         label += " (Today)"
     return label
+
+
+# The weekly view's type, largest first: (day name, event, note such as
+# "No events", space after each day). The largest that fits the whole week is
+# used, so a quiet week reads from across the room and a busy one still fits.
+_WEEK_TYPE_SIZES = (
+    (40, 34, 28, 22),
+    (36, 31, 26, 18),
+    (33, 28, 24, 14),
+    (30, 26, 22, 10),
+    (28, 24, 22, 8),
+)
+_WEEK_BULLET = "•  "
+
+
+def _week_event_lines(
+    draw: ImageDraw.ImageDraw,
+    sizes: Tuple[int, int, int, int],
+    days: List[date],
+    events_by_day: Dict[date, List[Event]],
+    content_w: float,
+) -> Dict[date, List[List[str]]]:
+    """Each day's event titles, wrapped (two lines at most) at `sizes`."""
+    font = _load_font(sizes[1])
+    max_w = content_w - draw.textlength(_WEEK_BULLET, font=font)
+    return {
+        day: [_wrap_text(draw, e.title, font, max_w, max_lines=2) for e in events_by_day.get(day, [])]
+        for day in days
+    }
+
+
+def _week_day_height(sizes: Tuple[int, int, int, int], event_lines: List[List[str]], shown: int) -> int:
+    """Height of one day showing its first `shown` events, a "+N more" for the rest, then its gap."""
+    header, event, note, gap = sizes
+    height = header + 10 + sum(len(lines) for lines in event_lines[:shown]) * (event + 8)
+    if shown < len(event_lines) or not event_lines:
+        height += note + 8  # "+N more", or "No events"
+    return height + gap
+
+
+def _fit_week(
+    draw: ImageDraw.ImageDraw,
+    days: List[date],
+    events_by_day: Dict[date, List[Event]],
+    content_w: float,
+    available_h: float,
+) -> Tuple[Tuple[int, int, int, int], Dict[date, List[List[str]]], Dict[date, int]]:
+    """The type sizes, wrapped titles and number of events to show per day, so every day fits.
+
+    The largest sizes that fit every event are used. When even the smallest
+    don't, the day showing the most lines gives up its last event to a
+    "+N more" line (the later day, on a tie, keeping the nearest days whole),
+    one at a time until the week fits -- so no day drops off the bottom.
+
+    A panel too short for even seven bare day names (the smaller Impressions)
+    can't be helped that way: trimming would empty every day and still lose
+    some. It gets the largest type and every event, and the caller shows days
+    whole until the room runs out.
+    """
+    for sizes in _WEEK_TYPE_SIZES:
+        lines = _week_event_lines(draw, sizes, days, events_by_day, content_w)
+        shown = {day: len(lines[day]) for day in days}
+        if sum(_week_day_height(sizes, lines[day], shown[day]) for day in days) <= available_h:
+            return sizes, lines, shown
+
+    def total() -> int:
+        return sum(_week_day_height(sizes, lines[day], shown[day]) for day in days)
+
+    shown = {day: 0 for day in days}
+    if total() > available_h:
+        sizes = _WEEK_TYPE_SIZES[0]
+        lines = _week_event_lines(draw, sizes, days, events_by_day, content_w)
+        return sizes, lines, {day: len(lines[day]) for day in days}
+
+    shown = {day: len(lines[day]) for day in days}
+    while total() > available_h:
+        trimmable = [day for day in days if shown[day] > 0]
+        if not trimmable:
+            break
+        busiest = max(trimmable, key=lambda day: (sum(len(t) for t in lines[day][: shown[day]]), day))
+        shown[busiest] -= 1
+    return sizes, lines, shown
+
+
+def _day_weather_segments(forecast: DayForecast) -> List[Tuple[str, Optional[int]]]:
+    """A day's weather for the weekly view, as (text, temperature) pieces.
+
+    "Rain 60%   ☔ 61° / 45°": rain or snow first, when it's expected, so the
+    high and low end flush with the right margin every day. Pieces carrying a
+    temperature are drawn bold in that temperature's colour, as on the daily view.
+    """
+    segments: List[Tuple[str, Optional[int]]] = []
+    if forecast.precipitation:
+        chance = f" {forecast.precipitation_chance}%" if forecast.precipitation_chance is not None else ""
+        segments.append((f"{forecast.precipitation}{chance}   ", None))
+    if forecast.icon:
+        segments.append((f"{forecast.icon} ", None))
+    segments += [(f"{forecast.high_f}°", forecast.high_f), (" / ", None), (f"{forecast.low_f}°", forecast.low_f)]
+    return segments
+
+
+def _weather_segment_width(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    temperature: Optional[int],
+    font: ImageFont.FreeTypeFont,
+    temperature_font: ImageFont.FreeTypeFont,
+) -> float:
+    if temperature is None:
+        return draw.textlength(text, font=font)
+    return draw.textlength(text, font=temperature_font) + (2 * WEATHER_TEMP_STROKE_WIDTH)
+
+
+def _day_weather_width(
+    draw: ImageDraw.ImageDraw,
+    forecast: DayForecast,
+    font: ImageFont.FreeTypeFont,
+    temperature_font: ImageFont.FreeTypeFont,
+) -> float:
+    return sum(
+        _weather_segment_width(draw, text, temperature, font, temperature_font)
+        for text, temperature in _day_weather_segments(forecast)
+    )
+
+
+def _draw_day_weather(
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    forecast: DayForecast,
+    font: ImageFont.FreeTypeFont,
+    temperature_font: ImageFont.FreeTypeFont,
+) -> None:
+    for text, temperature in _day_weather_segments(forecast):
+        if temperature is None:
+            draw.text((x, y), text, fill="black", font=font)
+        else:
+            draw.text(
+                (x, y),
+                text,
+                fill=_temperature_color(temperature),
+                font=temperature_font,
+                stroke_width=WEATHER_TEMP_STROKE_WIDTH,
+                stroke_fill="black",
+            )
+        x += _weather_segment_width(draw, text, temperature, font, temperature_font)
 
 
 def render_weekly_schedule(
@@ -884,15 +1043,14 @@ def render_weekly_schedule(
     weather_alerts: Optional[List[WeatherAlert]] = None,
     update_pending: bool = False,
     days: int = 7,
+    day_forecasts: Optional[Dict[date, DayForecast]] = None,
 ) -> Image.Image:
-    """Weekly overview: the next `days` days, event names only (no times)."""
+    """Weekly overview: the next `days` days, event names only (no times), each with its weather."""
     img = Image.new("RGB", (canvas_w, canvas_h), "white")
     d = ImageDraw.Draw(img)
 
     font_header = _load_font(64)
     font_subheader = _load_font(34)
-    font_day_header = _load_bold_font(40)
-    font_event = _load_font(34)
     font_small = _load_font(28)
     font_alert_header = _load_font(34)
 
@@ -961,43 +1119,60 @@ def render_weekly_schedule(
 
     max_y = canvas_h - padding - (banner_h if show_sleep_banner else 0) - footer_block_h - weather_alert_block_h
 
-    day_header_h = font_day_header.size + 10
-    event_line_h = font_event.size + 8
-    no_events_h = font_small.size + 8
-    day_block_gap = 22
-    bullet = "•  "
-    bullet_w = d.textlength(bullet, font=font_event)
-    max_event_w = canvas_w - (2 * padding) - bullet_w
+    content_w = canvas_w - (2 * padding)
+    week_days = [today + timedelta(days=offset) for offset in range(days)]
+    sizes, event_lines_by_day, shown_by_day = _fit_week(d, week_days, events_by_day, content_w, max_y - y)
+    header_size, event_size, note_size, day_block_gap = sizes
+    font_day_header = _load_bold_font(header_size)
+    font_event = _load_font(event_size)
+    font_event_bold = _load_bold_font(event_size)
+    font_note = _load_font(note_size)
+    day_header_h = header_size + 10
+    event_line_h = event_size + 8
+    note_h = note_size + 8
+    bullet_w = d.textlength(_WEEK_BULLET, font=font_event)
+    day_forecasts = day_forecasts or {}
 
     hidden_days = 0
-    for offset in range(days):
-        day = today + timedelta(days=offset)
-        day_events = events_by_day.get(day, [])
-        event_lines = [_wrap_text(d, e.title, font_event, max_event_w, max_lines=2) for e in day_events]
+    for offset, day in enumerate(week_days):
+        event_lines = event_lines_by_day[day]
+        shown = shown_by_day[day]
 
-        first_row_h = (len(event_lines[0]) * event_line_h) if event_lines else no_events_h
+        first_row_h = (len(event_lines[0]) * event_line_h) if event_lines and shown else note_h
         if y + day_header_h + first_row_h > max_y:
             hidden_days = days - offset
             break
 
-        d.text((padding, y), _weekday_header_label(day, today), fill="black", font=font_day_header)
+        # The day's name on the left, its weather on the right; the month is
+        # shortened on a day whose name and weather wouldn't both fit.
+        forecast = day_forecasts.get(day)
+        weather_w = _day_weather_width(d, forecast, font_event, font_event_bold) if forecast else 0
+        label = _weekday_header_label(day, today)
+        if forecast and d.textlength(label, font=font_day_header) + 24 + weather_w > content_w:
+            label = _weekday_header_label(day, today, short_month=True)
+        d.text((padding, y), label, fill="black", font=font_day_header)
+        if forecast:
+            _draw_day_weather(
+                d, canvas_w - padding - weather_w, y + header_size - event_size, forecast, font_event, font_event_bold
+            )
         y += day_header_h
         d.line((padding, y - 4, padding + 220, y - 4), fill="black", width=2)
 
-        if not day_events:
-            d.text((padding, y), "No events", fill="black", font=font_small)
-            y += no_events_h
+        if not event_lines:
+            d.text((padding, y), "No events", fill="black", font=font_note)
+            y += note_h
         else:
-            for idx, (e, lines) in enumerate(zip(day_events, event_lines)):
+            for idx, lines in enumerate(event_lines):
                 needed_h = len(lines) * event_line_h
-                has_more_hidden = idx < len(day_events) - 1
-                reserve = (font_small.size + 8) if has_more_hidden else 0
-                if y + needed_h + reserve > max_y:
-                    remaining = len(day_events) - idx
-                    d.text((padding, y), f"+{remaining} more", fill="black", font=font_small)
-                    y += font_small.size + 8
+                has_more_hidden = idx < len(event_lines) - 1
+                reserve = note_h if has_more_hidden else 0
+                # `shown` is where _fit_week ran out of room; the check against
+                # max_y only matters on a panel too short for the whole week.
+                if idx >= shown or y + needed_h + reserve > max_y:
+                    d.text((padding, y), f"+{len(event_lines) - idx} more", fill="black", font=font_note)
+                    y += note_h
                     break
-                d.text((padding, y), bullet, fill="black", font=font_event)
+                d.text((padding, y), _WEEK_BULLET, fill="black", font=font_event)
                 for i, line in enumerate(lines):
                     d.text((padding + bullet_w, y + i * event_line_h), line, fill="black", font=font_event)
                 y += needed_h
