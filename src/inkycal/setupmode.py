@@ -27,8 +27,13 @@ import os
 import time
 from typing import Optional
 
-# How long a session lasts, and how much more time each press of C gives it.
+# How long a session lasts, and how much more time each hold of C gives it.
 SESSION_MINUTES = 10
+
+# How long C has to be held down before it does anything (D too; see
+# inkycal.buttons). Setup mode replaces the calendar with a code for someone
+# who isn't there to read it, so a passing tap must not start it.
+HOLD_SECONDS = 3
 
 # /run is a tmpfs: nothing here outlives a reboot, so a session cut short by a
 # power cut can never leave the panel held for one that no longer exists.

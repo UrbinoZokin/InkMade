@@ -177,7 +177,7 @@ def test_the_first_reason_to_end_is_the_one_kept():
         pytest.param(lambda ses: [_try(ses, "000000") for _ in range(4)], WRONG, "1 try left", id="last-try"),
         pytest.param(lambda ses: [_try(ses, "000000") for _ in range(5)], WRONG, "Too many wrong", id="locked-out"),
         pytest.param(lambda ses: None, UNPAIRED, "Start again", id="unpaired"),
-        pytest.param(lambda ses: ses.finish("timed out"), CLOSED, "Press button C", id="ended"),
+        pytest.param(lambda ses: ses.finish("timed out"), CLOSED, "Hold down button C", id="ended"),
     ],
 )
 def test_refusals_say_what_to_do_next(setup, verdict, expected):

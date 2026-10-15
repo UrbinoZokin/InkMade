@@ -55,6 +55,9 @@ class _NoWeather:
     def forecast_for_event_start(self, _start):
         return None
 
+    def daily_forecasts(self):
+        return {}
+
 
 @pytest.fixture
 def paths(tmp_path):
@@ -91,7 +94,8 @@ def _event(title: str, hour: int, day_offset: int = 0, location: str | None = No
 
 def test_one_calendar_fetch_serves_both_views(paths, panel, monkeypatch):
     # The daily view used to fetch today and tomorrow separately, and the
-    # weekly view the whole week again; today and tomorrow are inside it.
+    # weekly view the whole week again; today and tomorrow are inside it, and
+    # the week is inside the two weeks the upcoming-birthdays line looks at.
     fetches = []
     monkeypatch.setattr(
         main, "_fetch_raw_events", lambda _cfg, start, end, _tz: fetches.append((start, end)) or []
@@ -103,7 +107,7 @@ def test_one_calendar_fetch_serves_both_views(paths, panel, monkeypatch):
     assert len(fetches) == 1
     start, end = fetches[0]
     assert start == datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0)
-    assert end - start == timedelta(days=7)
+    assert end - start == timedelta(days=main.BIRTHDAY_LOOKAHEAD_DAYS) == timedelta(days=14)
 
 
 def test_both_views_are_left_saved(paths, calendar, panel):
@@ -238,3 +242,38 @@ def test_weather_and_travel_are_looked_up_only_for_a_frame_being_drawn(paths, ca
     main.run_once(config_path=config_path, state_path=state_path)
     assert lookups == []
     assert len(panel) == 1
+
+
+def test_the_weekly_view_is_drawn_with_each_days_forecast(paths, calendar, panel, monkeypatch):
+    forecast = {datetime.now(TZ).date(): object()}
+    received = []
+
+    class Forecasting(_NoWeather):
+        def daily_forecasts(self):
+            return forecast
+
+    def weekly(**kwargs):
+        received.append(kwargs["day_forecasts"])
+        return Image.new("RGB", (kwargs["canvas_w"], kwargs["canvas_h"]), "white")
+
+    monkeypatch.setattr(main, "WeatherForecastResolver", Forecasting)
+    monkeypatch.setattr(main, "render_weekly_schedule", weekly)
+    config_path, state_path = paths()
+
+    main.run_once(config_path=config_path, state_path=state_path)
+
+    assert received == [forecast]
+
+
+def test_a_failed_forecast_still_leaves_the_weekly_view_drawn(paths, calendar, panel, monkeypatch, capsys):
+    class Unreachable(_NoWeather):
+        def daily_forecasts(self):
+            raise OSError("timed out")
+
+    monkeypatch.setattr(main, "WeatherForecastResolver", Unreachable)
+    config_path, state_path = paths()
+
+    main.run_once(config_path=config_path, state_path=state_path)
+
+    assert frames.read_frame_info(state_path, "weekly") is not None
+    assert "drawing the week without it" in capsys.readouterr().out

@@ -71,8 +71,8 @@ sudo systemctl enable --now inkycal-provisioning.service
 
 echo
 echo "== Done =="
-echo "The agent only runs in setup mode: for 10 minutes after you press"
-echo "button C, or by itself while this InkyCal has no Google token or WiFi"
+echo "The agent only runs in setup mode: for 10 minutes after you hold down"
+echo "button C for 3 seconds, or by itself while this InkyCal has no Google token or WiFi"
 echo "network yet. Setup mode puts a one-time setup code on the screen; the"
 echo "companion app asks for it, and everything it sends over Bluetooth"
 echo "('InkyCal-Setup') or WiFi (mDNS _inkycal._tcp) is encrypted with a key"

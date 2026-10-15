@@ -1,7 +1,7 @@
 """Lightweight helpers for the over-the-air update feature.
 
 The render loop uses these to *check* (never apply) whether the local checkout
-is behind the tracked branch on GitHub, so it can show "Update pending" in the
+is behind the tracked branch on GitHub, so it can show the update badge in the
 status bar. Applying updates is done separately by scripts/ota_update.sh.
 Everything here is best-effort and never raises into the render path.
 """

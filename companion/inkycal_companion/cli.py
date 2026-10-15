@@ -11,7 +11,7 @@ import sys
 from . import workflow
 from .discovery import PiDevice, HTTP_PORT
 
-NOT_FOUND_HINT = "Press button C on the InkyCal to turn on setup mode, then try again."
+NOT_FOUND_HINT = "Hold down button C on the InkyCal for 3 seconds to turn on setup mode, then try again."
 
 
 def _log(msg: str) -> None:
@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", help="Skip discovery; use this Pi IP/hostname directly.")
     parser.add_argument("--port", type=int, default=HTTP_PORT)
     parser.add_argument("--setup-code", "--pairing-token", dest="setup_code", default="",
-                        help="The setup code on the InkyCal's screen (press button C to show it). "
+                        help="The setup code on the InkyCal's screen (hold down button C to show it). "
                              "Asked for if not given.")
     parser.add_argument("--wifi-timeout", type=float, default=5.0)
     parser.add_argument("--bt-timeout", type=float, default=8.0)

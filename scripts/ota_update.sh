@@ -211,7 +211,7 @@ if [ "$LOCAL" = "$REMOTE" ]; then
 fi
 
 # An update is available. Unless we're allowed to apply now (apply_window), hold
-# off — the display shows "Update pending" and we'll apply during the overnight
+# off — the display shows the update badge and we'll apply during the overnight
 # sleep window when nobody's looking.
 if [ "$SHOULD_APPLY" != "true" ]; then
   log "Update available (${LOCAL:0:9} -> ${REMOTE:0:9}), but outside the apply window; deferring to the overnight sleep window."
@@ -295,7 +295,7 @@ fi
 
 # Re-render with the new code, and force it. Updates are normally applied in
 # the sleep window, where an unforced render returns early once the night's
-# banner is up: "Update pending" would stay on the panel until morning, and so
+# banner is up: the update badge would stay on the panel until morning, and so
 # would button D's "Checking for updates..." notice (restarting the button
 # daemon above killed the render it was waiting to run). inkycal-boot.service
 # is the unit that forces a repaint, as install.sh uses it; a device without it

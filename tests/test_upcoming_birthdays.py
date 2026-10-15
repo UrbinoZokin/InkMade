@@ -1,0 +1,191 @@
+"""The daily view's "Upcoming birthdays" line: the next two weeks' birthdays,
+early enough to post a card, taken from the same fetch as everything else."""
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from PIL import Image, ImageDraw
+
+from inkycal import main
+from inkycal.main import _fetch_view_events, _split_for_views, _view_signature, _Snapshot
+from inkycal.models import Event
+from inkycal.render import _upcoming_birthday_lines, render_daily_schedule
+
+TZ = ZoneInfo("America/Phoenix")
+NOW = datetime(2026, 10, 6, 8, 0, tzinfo=TZ)  # a Tuesday
+MIDNIGHT = NOW.replace(hour=0)
+
+
+def _birthday(days_ahead, title, source="google"):
+    start = MIDNIGHT + timedelta(days=days_ahead)
+    return Event(source=source, title=title, start=start, end=start + timedelta(days=1), all_day=True, birthday=True)
+
+
+def _upcoming(raw):
+    return [(e.title, e.start.strftime("%a")) for e in _split_for_views(raw, NOW, TZ).upcoming_birthdays]
+
+
+def test_lists_the_birthdays_after_tomorrow_soonest_first():
+    raw = [
+        _birthday(5, "Tom Hart's birthday"),
+        _birthday(0, "Today Person's birthday"),
+        _birthday(1, "Uncle Ray's birthday"),
+        _birthday(3, "Emma Segal's birthday"),
+        _birthday(6, "Grandma Rose's birthday"),
+    ]
+
+    # Today's and tomorrow's have their own "Birthdays" rows already.
+    assert _upcoming(raw) == [("Emma Segal", "Fri"), ("Tom Hart", "Sun"), ("Grandma Rose", "Mon")]
+
+
+def test_looks_two_weeks_ahead():
+    raw = [_birthday(10, "Tom Hart's birthday"), _birthday(13, "Grandma Rose's birthday"), _birthday(14, "Too Far's birthday")]
+
+    assert [title for title, _day in _upcoming(raw)] == ["Tom Hart", "Grandma Rose"]
+
+
+def test_one_fetch_covers_the_two_weeks(monkeypatch):
+    asked = []
+    monkeypatch.setattr(main, "_fetch_raw_events", lambda cfg, start, end, tz: asked.append((start, end)) or [])
+
+    _fetch_view_events(None, NOW, TZ)
+
+    assert asked == [(MIDNIGHT, MIDNIGHT + timedelta(days=14))]
+
+
+def test_the_weekly_view_still_covers_seven_days():
+    """The fetch runs into next week for the birthdays; the weekly view must
+    not take those events in, or a change next week would repaint it."""
+    this_week = Event(source="google", title="Bridge club", start=MIDNIGHT + timedelta(days=6, hours=14),
+                      end=MIDNIGHT + timedelta(days=6, hours=16))
+    next_week = Event(source="google", title="Dentist", start=MIDNIGHT + timedelta(days=8, hours=9),
+                      end=MIDNIGHT + timedelta(days=8, hours=10))
+
+    week = _split_for_views([this_week, next_week], NOW, TZ).week
+
+    assert [e.title for e in week] == ["Bridge club"]
+
+
+def test_a_birthday_on_two_calendars_is_listed_once():
+    raw = [_birthday(3, "Emma Segal's birthday"), _birthday(3, "Emma Segal", source="icloud")]
+
+    assert _upcoming(raw) == [("Emma Segal", "Fri")]
+
+
+def test_other_all_day_events_are_not_birthdays():
+    trip = Event(
+        source="google", title="Beach trip", start=MIDNIGHT + timedelta(days=3),
+        end=MIDNIGHT + timedelta(days=4), all_day=True,
+    )
+
+    assert _upcoming([trip]) == []
+
+
+def _daily_signature(raw):
+    snap = _Snapshot(
+        now=NOW, events=_split_for_views(raw, NOW, TZ), reminders=[], weather_alerts=[],
+        header_date="", show_banner=False, wifi_status="connected", ups_status={}, update_pending=False,
+    )
+    return _view_signature("daily", snap, TZ)
+
+
+def test_a_new_upcoming_birthday_repaints_the_daily_view():
+    assert _daily_signature([]) != _daily_signature([_birthday(4, "Emma Segal's birthday")])
+
+
+def _written_by_daily_view(monkeypatch, upcoming):
+    written = []
+    original_text = ImageDraw.ImageDraw.text
+
+    def recording_text(self, xy, text, *args, **kwargs):
+        written.append(text)
+        return original_text(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", recording_text)
+    render_daily_schedule(
+        canvas_w=1200, canvas_h=1600, now=NOW, events=[], tz=TZ,
+        show_sleep_banner=False, sleep_banner_text="", upcoming_birthdays=upcoming,
+    )
+    return written
+
+
+def test_the_daily_view_shows_the_line(monkeypatch):
+    upcoming = _split_for_views([_birthday(3, "Emma Segal's birthday")], NOW, TZ).upcoming_birthdays
+
+    assert "Upcoming birthdays: Emma Segal (Fri)" in _written_by_daily_view(monkeypatch, upcoming)
+
+
+def test_next_weeks_birthdays_are_dated_since_their_weekday_comes_round_twice(monkeypatch):
+    raw = [_birthday(6, "Emma Segal's birthday"), _birthday(7, "Tom Hart's birthday"), _birthday(10, "Grandma Rose's birthday")]
+    upcoming = _split_for_views(raw, NOW, TZ).upcoming_birthdays
+
+    shown = " ".join(_written_by_daily_view(monkeypatch, upcoming))
+
+    for entry in ("Emma Segal (Mon)", "Tom Hart (Oct 13)", "Grandma Rose (Oct 16)"):
+        assert entry in shown
+
+
+def test_no_line_without_upcoming_birthdays(monkeypatch):
+    assert not any("Upcoming" in t for t in _written_by_daily_view(monkeypatch, []))
+
+
+def _lines_and_font(names, width=1120):
+    draw = ImageDraw.Draw(Image.new("RGB", (1200, 100)))
+    birthdays = [_birthday(2 + i % 12, name) for i, name in enumerate(names)]
+    return _upcoming_birthday_lines(draw, birthdays, TZ, NOW.date(), width)
+
+
+def _lines(names, width=1120):
+    return _lines_and_font(names, width)[0]
+
+
+def test_lines_break_between_people_not_inside_one():
+    lines = _lines(["Emma Segal", "Tom Hart", "Grandma Rose"], width=900)
+
+    assert len(lines) == 2
+    assert not any(line.endswith("•") for line in lines)
+    for entry in ("Emma Segal (Thu)", "Tom Hart (Fri)", "Grandma Rose (Sat)"):
+        assert any(entry in line for line in lines)
+
+
+def test_a_few_birthdays_get_the_full_size_type():
+    lines, font = _lines_and_font(["Emma Segal", "Tom Hart"])
+
+    assert font.size == 34
+    assert len(lines) == 1
+
+
+def test_a_busier_fortnight_shrinks_the_type_to_keep_to_two_lines():
+    names = ["Emma Segal", "Tom Hart", "Grandma Rose", "Cousin Bartholomew", "Aunt Philippa", "Little Timmy"]
+
+    lines, font = _lines_and_font(names)
+
+    assert len(lines) == 2
+    assert 24 <= font.size < 34
+    shown = " ".join(lines)
+    assert all(name in shown for name in names)
+
+
+def test_a_fortnight_too_full_for_two_lines_adds_lines_rather_than_hiding_anyone():
+    names = [
+        "Emma Segal", "Tom Hart", "Grandma Rose", "Cousin Bartholomew", "Aunt Philippa",
+        "Little Timmy", "Uncle Ray", "Dana Lee", "Mike Segal", "Pat Quinn", "Lou Reyes",
+    ]
+
+    lines, font = _lines_and_font(names)
+
+    assert font.size == 24, "the smallest readable size, before taking more lines"
+    assert 2 < len(lines) <= 4
+    shown = " ".join(lines)
+    assert all(name in shown for name in names)
+    assert "more" not in shown
+
+
+def test_only_an_extreme_fortnight_counts_some_as_more():
+    names = [f"Contact Number {i}" for i in range(30)]
+
+    lines, font = _lines_and_font(names)
+
+    assert font.size == 24
+    assert len(lines) == 4
+    shown = sum(f"{name} (" in " ".join(lines) for name in names)
+    assert lines[-1].endswith(f"+{len(names) - shown} more")

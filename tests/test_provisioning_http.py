@@ -130,7 +130,7 @@ def test_five_wrong_codes_end_setup_mode_for_good(api, token_path):
         f"{base_url}/pair", json={"message": _b64(setupcrypto.AppHandshake(CODE).message)}, timeout=10
     )
     assert late.status_code == 403
-    assert "Press button C" in late.json()["error"]
+    assert "Hold down button C" in late.json()["error"]
     assert not token_path.exists()
 
 

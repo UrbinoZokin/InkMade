@@ -473,3 +473,167 @@ def test_leaving_setup_mode_stops_the_agent_and_frees_the_panel(setup_files, mon
 
     assert calls == [["systemctl", "stop", "inkycal-provisioning.service"]]
     assert setupmode.is_active() is False
+
+
+# --- buttons C and D: act only once held ------------------------------------
+
+
+def _hold_to_act(acted, **kwargs):
+    return buttons._HoldToAct(
+        "Button C (setup)", "turn on setup mode", lambda: acted.append("acted"), echo=False, **kwargs
+    )
+
+
+def test_a_hold_button_ignores_a_tap_and_says_how_to_use_it(capsys):
+    acted = []
+    hold = _hold_to_act(acted)
+
+    hold.pressed()
+    hold.released()
+
+    assert acted == []
+    out = capsys.readouterr().out
+    assert "Button C (setup) let go too soon" in out
+    assert f"hold it for {setupmode.HOLD_SECONDS} seconds to turn on setup mode" in out
+
+
+def test_a_hold_button_acts_once_held_and_not_again_on_release(capsys):
+    acted = []
+    hold = _hold_to_act(acted)
+
+    hold.pressed()
+    hold.held()
+    hold.released()
+
+    assert acted == ["acted"]
+    assert "let go too soon" not in capsys.readouterr().out
+
+
+def test_a_hold_button_starts_over_on_every_press(capsys):
+    acted = []
+    hold = _hold_to_act(acted)
+
+    hold.pressed()
+    hold.held()
+    hold.released()
+    hold.pressed()
+    hold.released()
+
+    assert acted == ["acted"]
+    assert "let go too soon" in capsys.readouterr().out
+
+
+def test_a_press_claimed_as_it_goes_down_is_not_acted_on_again_when_held(capsys):
+    acted = []
+    hold = _hold_to_act(acted, on_press=lambda: True)
+
+    hold.pressed()
+    hold.held()
+    hold.released()
+
+    assert acted == []
+    assert "let go too soon" not in capsys.readouterr().out
+
+
+class _FakeButton:
+    """Stands in for gpiozero.Button: records how it was made, and can be tapped or held."""
+
+    def __init__(self, pin, **kwargs):
+        self.pin = pin
+        self.kwargs = kwargs
+        self.when_pressed = None
+        self.when_held = None
+        self.when_released = None
+
+    def _fire(self, *handlers):
+        for handler in handlers:
+            if handler is not None:
+                handler()
+
+    def tap(self):
+        self._fire(self.when_pressed, self.when_released)
+
+    def hold(self):
+        self._fire(self.when_pressed, self.when_held, self.when_released)
+
+
+@pytest.fixture
+def wired_buttons(tmp_path, monkeypatch, setup_files):
+    """Run buttons.main() against fake buttons; return them by board label, and what they did."""
+    import signal
+    import sys
+
+    made = {}
+
+    def make(pin, **kwargs):
+        made[pin] = _FakeButton(pin, **kwargs)
+        return made[pin]
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("timezone: 'America/Phoenix'\nbuttons:\n  echo_to_terminals: false\n", encoding="utf-8")
+    monkeypatch.setenv("INKYCAL_CONFIG", str(config_path))
+    monkeypatch.setenv("INKYCAL_STATE", str(tmp_path / "state.json"))
+    monkeypatch.setitem(sys.modules, "gpiozero", SimpleNamespace(Button=make))
+    monkeypatch.setattr(signal, "pause", lambda: None)
+
+    did = []
+    monkeypatch.setattr(buttons, "_run_guarded", lambda label, action, *, echo: action())
+    monkeypatch.setattr(buttons, "_show_feedback", lambda *a, **kw: None)
+    monkeypatch.setattr(buttons, "_switch_view", lambda *a, **kw: did.append("switch view"))
+    monkeypatch.setattr(buttons, "_run_main", lambda *a, **kw: did.append("render"))
+    monkeypatch.setattr(buttons, "_start_setup_mode", lambda *, echo: did.append("setup mode"))
+    monkeypatch.setattr(buttons, "_leave_setup_mode", lambda *, echo: did.append("leave setup mode"))
+    monkeypatch.setattr(buttons, "_trigger_force_update", lambda state_path: did.append("update") or False)
+
+    buttons.main()
+
+    by_label = {label: made[pin] for label, pin in zip("ABCD", (5, 6, 25, 24))}
+    return by_label, did
+
+
+def test_c_and_d_are_made_to_wait_for_a_hold_and_a_and_b_are_not(wired_buttons):
+    by_label, _did = wired_buttons
+
+    assert by_label["C"].kwargs["hold_time"] == setupmode.HOLD_SECONDS
+    assert by_label["D"].kwargs["hold_time"] == setupmode.HOLD_SECONDS
+    assert "hold_time" not in by_label["A"].kwargs
+    assert "hold_time" not in by_label["B"].kwargs
+
+
+def test_a_tap_on_c_or_d_does_nothing(wired_buttons):
+    by_label, did = wired_buttons
+
+    by_label["C"].tap()
+    by_label["D"].tap()
+
+    assert did == []
+
+
+def test_holding_c_turns_on_setup_mode_and_holding_d_checks_for_updates(wired_buttons):
+    by_label, did = wired_buttons
+
+    by_label["C"].hold()
+    by_label["D"].hold()
+
+    assert did == ["setup mode", "update"]
+
+
+def test_a_and_b_still_act_on_a_tap(wired_buttons):
+    by_label, did = wired_buttons
+
+    by_label["A"].tap()
+    by_label["B"].tap()
+
+    assert did == ["switch view", "render"]
+
+
+def test_a_tap_on_d_still_leaves_setup_mode_and_holding_it_does_not_also_update(wired_buttons):
+    """Getting back to the calendar is a tap on A, B or D, as it always was.
+    Someone who holds D down to do that must not get an update check as well."""
+    by_label, did = wired_buttons
+    setupmode.mark_active(600)
+
+    by_label["D"].tap()
+    by_label["D"].hold()
+
+    assert did == ["leave setup mode", "leave setup mode"]

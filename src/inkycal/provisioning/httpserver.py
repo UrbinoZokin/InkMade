@@ -169,7 +169,7 @@ class _Handler(BaseHTTPRequestHandler):
         verdict, plaintext, channel = session.open(data.get("pairing"), sealed, purpose)
         if verdict != OK:
             # 403 once the session can't be used any more, so the app can tell
-            # "type it again" from "press C again".
+            # "type it again" from "hold C again".
             self._send_json(403 if session.ended else 401, {"error": refusal(verdict, session)})
             return None
         return plaintext, channel

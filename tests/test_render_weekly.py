@@ -157,19 +157,81 @@ def test_multiday_all_day_event_appears_on_every_day_it_spans(monkeypatch):
     assert texts.count("No events") == 4
 
 
-def test_update_pending_line_is_drawn(monkeypatch):
-    tz = ZoneInfo("America/Phoenix")
+# --- every day of the week, with its weather ---------------------------------
+
+from datetime import date, timedelta  # noqa: E402
+
+from inkycal.weather import DayForecast  # noqa: E402
+
+TZ = ZoneInfo("America/Phoenix")
+NOW = datetime(2026, 10, 15, 8, 0, tzinfo=TZ)  # a Thursday
+DAY_NAMES = ["Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"]
+
+
+def _busy_week(per_day):
+    return [
+        Event(
+            source="google",
+            title=f"Appointment number {n} on day {offset}",
+            start=datetime(2026, 10, 15, 8 + n, 0, tzinfo=TZ) + timedelta(days=offset),
+            end=datetime(2026, 10, 15, 9 + n, 0, tzinfo=TZ) + timedelta(days=offset),
+        )
+        for offset in range(7)
+        for n in range(per_day)
+    ]
+
+
+def _weekly_texts(monkeypatch, events, **kwargs):
+    observed = _capture_text(monkeypatch)
+    render_weekly_schedule(
+        canvas_w=1200, canvas_h=1600, now=NOW, week_events=events, tz=TZ,
+        show_sleep_banner=False, sleep_banner_text="", **kwargs,
+    )
+    return [t for _, t in observed]
+
+
+def test_a_busy_week_still_shows_all_seven_days(monkeypatch):
+    texts = _weekly_texts(monkeypatch, _busy_week(per_day=8))
+
+    for name in DAY_NAMES:
+        assert any(t.startswith(name) for t in texts), f"{name} dropped off the week"
+    assert not any("more day" in t for t in texts)
+    # What doesn't fit is counted under its own day, not lost without a word.
+    assert any(t.startswith("+") and t.endswith("more") for t in texts)
+
+
+def test_a_moderate_week_shows_every_event_in_smaller_type_rather_than_dropping_any(monkeypatch):
+    texts = _weekly_texts(monkeypatch, _busy_week(per_day=3))
+
+    assert sum(t.startswith("Appointment number") for t in texts) == 21
+    assert not any(t.endswith("more") for t in texts)
+
+
+def test_each_day_shows_its_high_and_low_and_any_rain_or_snow(monkeypatch):
+    forecasts = {
+        date(2026, 10, 15): DayForecast(high_f=92, low_f=68, icon="☀"),
+        date(2026, 10, 16): DayForecast(high_f=61, low_f=45, icon="☔", precipitation="Rain", precipitation_chance=60),
+        date(2026, 10, 17): DayForecast(high_f=30, low_f=18, icon="❄", precipitation="Snow"),
+    }
+
+    texts = _weekly_texts(monkeypatch, [], day_forecasts=forecasts)
+
+    for expected in ("92°", "68°", "61°", "45°", "Rain 60%   ", "30°", "18°", "Snow   "):
+        assert expected in texts
+    # Only the days with a forecast get one.
+    assert sum(t.endswith("°") for t in texts) == 6
+
+
+def test_a_long_day_name_shortens_its_month_to_keep_its_weather(monkeypatch):
+    now = datetime(2026, 9, 30, 8, 0, tzinfo=TZ)  # Wednesday, September 30
+    forecast = {date(2026, 9, 30): DayForecast(high_f=104, low_f=100, icon="☔", precipitation="Rain", precipitation_chance=100)}
     observed = _capture_text(monkeypatch)
 
     render_weekly_schedule(
-        canvas_w=1200,
-        canvas_h=1600,
-        now=datetime(2026, 2, 5, 8, 0, tzinfo=tz),
-        week_events=[],
-        tz=tz,
-        show_sleep_banner=False,
-        sleep_banner_text="",
-        update_pending=True,
+        canvas_w=1200, canvas_h=1600, now=now, week_events=[], tz=TZ,
+        show_sleep_banner=False, sleep_banner_text="", day_forecasts=forecast,
     )
 
-    assert any("Update pending" in t for _, t in observed)
+    texts = [t for _, t in observed]
+    assert "Wednesday, Sep 30 (Today)" in texts
+    assert "Thursday, October 1" in texts, "a day without that problem keeps its full month"
