@@ -15,10 +15,44 @@ Run this on each OS you want to ship for; PyInstaller does not cross-compile.
 from __future__ import annotations
 
 import sys
+from importlib import metadata
+from pathlib import Path
 
 import PyInstaller.__main__
+from packaging.requirements import Requirement
 
 APP_NAME = "InkyCal-Setup"
+REQUIREMENTS = Path(__file__).with_name("requirements.txt")
+
+
+def _check_runtime_dependencies() -> None:
+    """Stop the build if anything in requirements.txt isn't installed here.
+
+    PyInstaller bundles only what it can import from the Python running it.
+    A missing package isn't an error to it: it notes it in a warnings file,
+    finishes "successfully", and the executable then dies on launch with
+    ModuleNotFoundError. That happens whenever requirements.txt gains a
+    dependency and the build environment isn't re-synced with it.
+    """
+    missing = []
+    for line in REQUIREMENTS.read_text().splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        req = Requirement(line)
+        if req.marker is not None and not req.marker.evaluate():
+            continue
+        try:
+            metadata.version(req.name)
+        except metadata.PackageNotFoundError:
+            missing.append(str(req))
+    if missing:
+        sys.exit(
+            "Not building: these runtime dependencies aren't installed in the "
+            "Python running this script, so the executable would crash on "
+            "launch:\n  " + "\n  ".join(missing) + "\n\nInstall them with:\n  "
+            f'"{sys.executable}" -m pip install -r "{REQUIREMENTS}"'
+        )
 
 
 def _bleak_backend_submodules() -> list[str]:
@@ -44,6 +78,7 @@ def _bleak_backend_submodules() -> list[str]:
 
 
 def build() -> None:
+    _check_runtime_dependencies()
     hidden_imports = [
         "bleak",
         "bleak.backends",
