@@ -32,7 +32,7 @@ The easiest path is a packaged executable (no Python needed by the end user):
 
 ```bash
 cd companion
-python -m pip install -r requirements.txt pyinstaller
+python -m pip install -r requirements.txt
 python build_executable.py
 ```
 

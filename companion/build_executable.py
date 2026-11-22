@@ -2,7 +2,7 @@
 """Build a one-click, single-file InkyCal Setup executable with PyInstaller.
 
 Usage:
-    pip install -r requirements.txt pyinstaller
+    python -m pip install -r requirements.txt
     python build_executable.py
 
 Output lands in ``dist/`` :
