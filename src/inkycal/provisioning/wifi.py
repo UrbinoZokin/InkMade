@@ -6,6 +6,7 @@ or a failed command, they return structured results the caller can act on.
 """
 from __future__ import annotations
 
+import re
 import shutil
 import socket
 import subprocess
@@ -115,5 +116,72 @@ def configure_wifi(ssid: str, psk: str, timeout: int = 60) -> tuple[bool, str]:
     if proc.returncode == 0:
         return True, proc.stdout.strip() or "Connected"
 
-    message = (proc.stderr or proc.stdout).strip() or "Unknown nmcli failure"
-    return False, message
+    message = _output(proc)
+    if psk and "key-mgmt" in message:
+        # `device wifi connect` takes the network's security type from the
+        # Pi's last scan. When the scan doesn't describe it, the profile gets
+        # the password but no security type, and NetworkManager refuses it
+        # ("802-11-wireless-security.key-mgmt: property is missing"). Name the
+        # type ourselves: "wpa-psk" covers WPA2 and mixed WPA2/WPA3 networks.
+        return _join_wpa_psk(ssid, psk, timeout)
+    return False, _explain(ssid, psk, message)
+
+
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
+
+
+def _join_wpa_psk(ssid: str, psk: str, timeout: int) -> tuple[bool, str]:
+    """Save a WPA2 profile for ``ssid`` without consulting the scan, then join it."""
+    add = ["nmcli", "connection", "add", "type", "wifi", "con-name", ssid, "ssid", ssid]
+    add += ["wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", psk]
+    try:
+        added = _run(add, timeout=15)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"nmcli error: {exc}"
+    found = _UUID.search(added.stdout or "")
+    if added.returncode != 0 or not found:
+        return False, _explain(ssid, psk, _output(added))
+    uuid = found.group(0)
+
+    try:
+        up = _run(["nmcli", "--wait", str(timeout), "connection", "up", "uuid", uuid], timeout=timeout + 5)
+    except subprocess.TimeoutExpired:
+        _forget(uuid)
+        return False, "Timed out joining network"
+    except (OSError, subprocess.SubprocessError) as exc:
+        _forget(uuid)
+        return False, f"nmcli error: {exc}"
+    if up.returncode == 0:
+        return True, up.stdout.strip() or "Connected"
+    _forget(uuid)
+    return False, _explain(ssid, psk, _output(up))
+
+
+def _forget(uuid: str) -> None:
+    """Delete a profile that never joined. Left saved, it would count as WiFi
+    being set up, and the next boot would skip setup mode."""
+    try:
+        _run(["nmcli", "connection", "delete", "uuid", uuid], timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _output(proc: subprocess.CompletedProcess) -> str:
+    return ((proc.stderr or proc.stdout) or "").strip()
+
+
+def _explain(ssid: str, psk: str, message: str) -> str:
+    """Turn an nmcli failure into something the person setting up can act on.
+
+    The status this ends up in can be read by anything in Bluetooth range, so
+    the password is scrubbed should nmcli ever echo it back. The log keeps
+    nmcli's own words but, like the Bluetooth log, not the network's name.
+    """
+    if psk:
+        message = message.replace(psk, "(password)")
+    print(f"[wifi] joining failed: {message.replace(ssid, '(network)')}")
+    if "Secrets were required" in message:
+        return f"Couldn't join {ssid}. Check the WiFi password."
+    if "No network with SSID" in message:
+        return f"Can't see a network called {ssid}. Check the name (capitals count) and that the Pi is in range."
+    return message or "Unknown nmcli failure"
