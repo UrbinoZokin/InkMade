@@ -24,7 +24,8 @@ from .network import get_ups_status, get_wifi_status
 from .reminders_google import fetch_google_tasks
 from .render import render_daily_schedule, render_weekly_schedule
 from .setupmode import SetupModeActive
-from .weather import WeatherAlert, WeatherForecastResolver
+from .geocode import CACHE_FILE_NAME as GEOCODE_CACHE_FILE_NAME, Geocoder, distance_miles
+from .weather import WeatherAlert, WeatherForecastResolver, forecasts_for_places
 from .state import STATE_PATH_DEFAULT, VIEW_MODES, State, load_state, save_state, toggle_view_mode
 from .travel import TravelTimeResolver
 from . import frames, updates
@@ -243,6 +244,83 @@ def _apply_travel_times(
 
 
 
+# Marks a temperature that's the forecast where the event is, not at home.
+ELSEWHERE_MARK = "*"
+
+
+def _event_place_forecasts(
+    events: List[Event],
+    cfg,
+    geocoder: Optional[Geocoder],
+) -> Dict[str, WeatherForecastResolver]:
+    """A forecast for each event address far enough from home for its weather to differ.
+
+    Keyed by the event's location text, as _apply_weather_forecast looks it
+    up. Within weather.event_location_min_miles of home the forecast is home's
+    anyway (Open-Meteo's grid is a few miles across), so those addresses are
+    left out, along with any the geocoder can't place. Every place left is
+    forecast in one download; if that fails, the result is empty and every
+    event gets home's weather, as it would with this turned off.
+    """
+    weather_cfg = cfg.weather
+    if geocoder is None or not getattr(weather_cfg, "event_locations", True):
+        return {}
+    home = (weather_cfg.latitude, weather_cfg.longitude)
+    min_miles = getattr(weather_cfg, "event_location_min_miles", 10.0)
+
+    places: Dict[str, Tuple[float, float]] = {}
+    seen = set()
+    for event in events:
+        location = (event.location or "").strip()
+        if event.all_day or not location or location in seen:
+            continue
+        seen.add(location)
+        coords = geocoder.locate(location)
+        if coords is not None and distance_miles(home, coords) > min_miles:
+            # Rounded to two decimals, within half a mile of the address:
+            # finer than the forecast grid, and addresses a street apart
+            # then share one forecast.
+            places[location] = (round(coords[0], 2), round(coords[1], 2))
+    geocoder.save()
+    if not places:
+        return {}
+
+    distinct = sorted(set(places.values()))
+    try:
+        resolvers = dict(zip(distinct, forecasts_for_places(cfg.timezone, distinct)))
+    except Exception as e:
+        print(f"Forecast for events away from home failed; giving them home weather. Error: {e}")
+        return {}
+    print(f"Weather for {len(places)} event address(es) away from home, from {len(distinct)} forecast place(s)")
+    return {location: resolvers[coords] for location, coords in places.items()}
+
+
+def _event_weather(
+    lookup: Callable[[WeatherForecastResolver], object],
+    place_resolver: Optional[WeatherForecastResolver],
+    home_resolver: WeatherForecastResolver,
+    what: str,
+):
+    """(weather, elsewhere): the forecast where the event is when there is one, else home's.
+
+    elsewhere is True only when the weather really is the event's place's,
+    so the asterisk never marks home weather that stood in for it.
+    """
+    if place_resolver is not None:
+        try:
+            weather = lookup(place_resolver)
+        except Exception as e:
+            print(f"Weather lookup at {what}'s address failed; using home weather. Error: {e}")
+            weather = None
+        if weather:
+            return weather, True
+    try:
+        return lookup(home_resolver), False
+    except Exception as e:
+        print(f"Weather lookup failed for {what}; continuing without weather. Error: {e}")
+        return None, False
+
+
 def _apply_weather_forecast(
     events: List[Event],
     timezone: str,
@@ -250,53 +328,47 @@ def _apply_weather_forecast(
     longitude: float,
     include_end_weather_for_long_events: bool = True,
     resolver: Optional[WeatherForecastResolver] = None,
+    place_resolvers: Optional[Dict[str, WeatherForecastResolver]] = None,
 ) -> List[Event]:
     # Pass the run's resolver in so every lookup shares its one forecast download.
+    # place_resolvers (see _event_place_forecasts) gives events away from home
+    # the forecast where they are instead.
     if resolver is None:
         resolver = WeatherForecastResolver(timezone=timezone, latitude=latitude, longitude=longitude)
+    place_resolvers = place_resolvers or {}
     processed: List[Event] = []
     for event in events:
         if event.all_day:
             processed.append(event)
             continue
 
+        place_resolver = place_resolvers.get((event.location or "").strip())
         weather_text = None
         weather_icon = None
         weather_temperature_f = None
         weather_end_text = None
         weather_end_icon = None
         weather_end_temperature_f = None
-        try:
-            weather = resolver.forecast_for_event_start(event.start)
-        except Exception as e:
-            print(f"Weather lookup failed for '{event.title}'; continuing without weather. Error: {e}")
-            weather = None
-
+        weather, elsewhere = _event_weather(
+            lambda r: r.forecast_for_event_start(event.start), place_resolver, resolver, f"'{event.title}'"
+        )
         if weather:
-            weather_text = f"{weather.temperature_f}°F"
+            weather_text = f"{weather.temperature_f}°F" + (ELSEWHERE_MARK if elsewhere else "")
             weather_icon = weather.icon
             weather_temperature_f = weather.temperature_f
 
         if include_end_weather_for_long_events and (event.end - event.start) > timedelta(minutes=60):
-            try:
-                end_weather = resolver.forecast_for_datetime(event.end)
-            except Exception as e:
-                print(f"Weather lookup failed for end of '{event.title}'; continuing without end weather. Error: {e}")
-                end_weather = None
+            end_weather, end_elsewhere = _event_weather(
+                lambda r: r.forecast_for_datetime(event.end), place_resolver, resolver, f"end of '{event.title}'"
+            )
             if end_weather:
-                weather_end_text = f"{end_weather.temperature_f}°F"
+                weather_end_text = f"{end_weather.temperature_f}°F" + (ELSEWHERE_MARK if end_elsewhere else "")
                 weather_end_icon = end_weather.icon
                 weather_end_temperature_f = end_weather.temperature_f
 
         processed.append(
-            Event(
-                source=event.source,
-                title=event.title,
-                start=event.start,
-                end=event.end,
-                all_day=event.all_day,
-                location=event.location,
-                travel_time_text=event.travel_time_text,
+            replace(
+                event,
                 weather_icon=weather_icon,
                 weather_text=weather_text,
                 weather_temperature_f=weather_temperature_f,
@@ -640,6 +712,7 @@ def _render_view(
     cfg,
     tz: ZoneInfo,
     weather_resolver: WeatherForecastResolver,
+    geocoder: Optional[Geocoder] = None,
 ) -> Image.Image:
     if view_mode == "weekly":
         # Each day's high, low and any rain or snow, from the same download
@@ -677,12 +750,15 @@ def _render_view(
         window = cfg.travel.back_to_back_window_minutes
         today = _apply_travel_times(today, origin, window, resolver=travel_resolver)
         tomorrow = _apply_travel_times(tomorrow, origin, window, resolver=travel_resolver)
+    # Both days' addresses, so a place on each is looked up and forecast once.
+    place_resolvers = _event_place_forecasts([*today, *tomorrow], cfg, geocoder)
     today = _apply_weather_forecast(
         today,
         cfg.timezone,
         cfg.weather.latitude,
         cfg.weather.longitude,
         resolver=weather_resolver,
+        place_resolvers=place_resolvers,
     )
     tomorrow = _apply_weather_forecast(
         tomorrow,
@@ -691,6 +767,7 @@ def _render_view(
         cfg.weather.longitude,
         include_end_weather_for_long_events=False,
         resolver=weather_resolver,
+        place_resolvers=place_resolvers,
     )
 
     return render_daily_schedule(
@@ -868,8 +945,17 @@ def run_once(
     signatures = {mode: _view_signature(mode, snap, tz) for mode in VIEW_MODES}
     sig = signatures[view_mode]
 
+    # Event addresses are only looked up for a daily frame being drawn, and
+    # each is remembered next to state.json (see inkycal.geocode).
+    geocoder = None
+    if cfg.weather.event_locations:
+        geocoder = Geocoder(
+            os.path.join(os.path.dirname(state_path) or ".", GEOCODE_CACHE_FILE_NAME),
+            near=(cfg.weather.latitude, cfg.weather.longitude),
+        )
+
     def render(mode: str) -> Image.Image:
-        return _render_view(mode, snap, cfg, tz, weather_resolver)
+        return _render_view(mode, snap, cfg, tz, weather_resolver, geocoder)
 
     should_force_hourly = _should_force_hourly_refresh(state, now, timedelta(hours=1))
     print(

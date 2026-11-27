@@ -52,6 +52,12 @@ class TravelConfig:
 class WeatherConfig:
     latitude: float
     longitude: float
+    # Give an event with an address more than event_location_min_miles from
+    # home the weather there, marked with an asterisk, instead of home's.
+    # Addresses are looked up with OpenStreetMap's geocoder; off keeps them
+    # on the Pi.
+    event_locations: bool = True
+    event_location_min_miles: float = 10.0
 
 @dataclass
 class AutoUpdateConfig:
@@ -153,6 +159,8 @@ def load_config(path: str) -> AppConfig:
         weather=WeatherConfig(
             latitude=float(weather.get("latitude", 33.4353)),
             longitude=float(weather.get("longitude", -112.3582)),
+            event_locations=bool(weather.get("event_locations", True)),
+            event_location_min_miles=float(weather.get("event_location_min_miles", 10.0)),
         ),
         auto_update=AutoUpdateConfig(
             enabled=bool(auto_update.get("enabled", True)),
