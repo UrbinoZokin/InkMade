@@ -18,6 +18,7 @@ from .calendar_google import CONTACTS_BIRTHDAY_CALENDAR_ID, fetch_google_events
 from .calendar_icloud import fetch_icloud_events
 from .config import CONFIG_PATH_DEFAULT, load_config
 from .display_inky import show_on_inky
+from .fetchnotice import GOOGLE, ICLOUD, WEATHER, WEATHER_ALERTS, FetchProblem, describe_error, http_status
 from .models import Event, Reminder
 from .network import get_ups_status, get_wifi_status
 from .reminders_google import fetch_google_tasks
@@ -319,17 +320,62 @@ def _google_calendar_ids(cfg) -> List[str]:
     return ids
 
 
-def _fetch_raw_events(cfg, range_start: datetime, range_end: datetime, tz: ZoneInfo) -> List[Event]:
+def _google_calendar_problem(
+    calendar_ids: List[str], failures: List[Tuple[str, Exception]]
+) -> Optional[FetchProblem]:
+    """What to tell the screen about the Google calendars that couldn't be read.
+
+    fetch_google_events skips an unreadable calendar and carries on, so a
+    network that drops mid-run, or one stale calendar id, used to leave no
+    trace but the log. The contacts birthday calendar is the exception: it's
+    added for everyone, and an account without one answers 404 on every run,
+    which isn't news.
+    """
+    failures = [
+        (cal_id, e)
+        for cal_id, e in failures
+        if not (cal_id == CONTACTS_BIRTHDAY_CALENDAR_ID and http_status(e) == 404)
+    ]
+    if not failures:
+        return None
+    if len(failures) == len(calendar_ids):
+        source = GOOGLE
+    else:
+        source = f"{GOOGLE} ({len(failures)} calendar{'s' if len(failures) > 1 else ''})"
+    return FetchProblem(source, describe_error(failures[0][1]))
+
+
+def _fetch_raw_events(
+    cfg,
+    range_start: datetime,
+    range_end: datetime,
+    tz: ZoneInfo,
+    problems: Optional[List[FetchProblem]] = None,
+) -> List[Event]:
+    """Every calendar's events in the range. A source that can't be fetched is
+    left out, and added to `problems` (when given) for the screen to report."""
+    if problems is None:
+        problems = []
     events: List[Event] = []
     if cfg.google.enabled:
         token_path = os.environ.get("GOOGLE_TOKEN_JSON", "")
         if token_path:
+            calendar_ids = _google_calendar_ids(cfg)
+            failures: List[Tuple[str, Exception]] = []
             try:
-                events.extend(fetch_google_events(_google_calendar_ids(cfg), range_start, range_end, tz, token_path))
+                events.extend(
+                    fetch_google_events(calendar_ids, range_start, range_end, tz, token_path, failures=failures)
+                )
             except Exception as e:
                 print(f"Google Calendar fetch failed; continuing without Google events. Error: {e}")
+                problems.append(FetchProblem(GOOGLE, describe_error(e)))
+            else:
+                problem = _google_calendar_problem(calendar_ids, failures)
+                if problem:
+                    problems.append(problem)
         else:
             print("Google enabled but GOOGLE_TOKEN_JSON not set; skipping Google. Generate it off-device with scripts/google_auth.py.")
+            problems.append(FetchProblem(GOOGLE, "not set up"))
 
     if cfg.icloud.enabled:
         try:
@@ -339,8 +385,10 @@ def _fetch_raw_events(cfg, range_start: datetime, range_end: datetime, tz: ZoneI
                 events.extend(fetch_icloud_events(range_start, range_end, tz, user, pw, cfg.icloud.calendar_name_allowlist))
             else:
                 print("iCloud enabled but ICLOUD_USERNAME/ICLOUD_APP_PASSWORD not set; skipping iCloud.")
+                problems.append(FetchProblem(ICLOUD, "not set up"))
         except Exception as e:
             print(f"iCloud fetch failed; continuing without iCloud. Error: {e}")
+            problems.append(FetchProblem(ICLOUD, describe_error(e)))
 
     # Both backends hand back all-day events that merely touch the requested
     # window (see calendar_common.event_overlaps_range), which is what made a
@@ -409,14 +457,16 @@ def _split_for_views(raw_events: List[Event], now: datetime, tz: ZoneInfo) -> _V
     )
 
 
-def _fetch_view_events(cfg, now: datetime, tz: ZoneInfo) -> _ViewEvents:
+def _fetch_view_events(
+    cfg, now: datetime, tz: ZoneInfo, problems: Optional[List[FetchProblem]] = None
+) -> _ViewEvents:
     # Today, tomorrow and the weekly view's seven days all fall within the
     # birthday lookahead, so one fetch of that span feeds both views. A backend
     # takes the same round trips to answer for two weeks as for one day, and
     # this replaces the separate today and tomorrow fetches the daily view used
     # to make on its own.
     fetch_start, fetch_end = _week_range(now, tz, days=BIRTHDAY_LOOKAHEAD_DAYS)
-    return _split_for_views(_fetch_raw_events(cfg, fetch_start, fetch_end, tz), now, tz)
+    return _split_for_views(_fetch_raw_events(cfg, fetch_start, fetch_end, tz, problems=problems), now, tz)
 
 
 def _reminder_sort_key(r: Reminder):
@@ -494,11 +544,15 @@ def _events_signature(
     view_mode: str = "daily",
     week_events: Optional[List[Event]] = None,
     upcoming_birthdays: Optional[List[Event]] = None,
+    fetch_problems: Optional[List[FetchProblem]] = None,
 ) -> str:
     # Only include fields that affect rendering. Weather and travel times are
     # left out: they're looked up only when a frame is drawn, weather changes
     # by the hour regardless (the hourly repaint picks it up), and a travel
-    # time follows from the locations, which are already in here.
+    # time follows from the locations, which are already in here. Whether the
+    # forecast could be fetched at all *is* in here, as one of fetch_problems:
+    # a frame drawn while it was down repaints, with its weather, as soon as
+    # it's back, instead of waiting out the hour with neither.
     def _event_payload(e: Event) -> dict:
         return {
             "source": e.source,
@@ -536,6 +590,7 @@ def _events_signature(
         "view_mode": view_mode,
         "week_events": [_event_payload(e) for e in (week_events or [])],
         "upcoming_birthdays": [_event_payload(e) for e in (upcoming_birthdays or [])],
+        "fetch_problems": [str(p) for p in (fetch_problems or [])],
     }
     b = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(b).hexdigest()
@@ -554,6 +609,8 @@ class _Snapshot:
     wifi_status: str
     ups_status: dict
     update_pending: bool
+    # What couldn't be fetched, for the notice at the bottom of either view.
+    fetch_problems: List[FetchProblem] = field(default_factory=list)
 
 
 def _view_signature(view_mode: str, snap: _Snapshot, tz: ZoneInfo) -> str:
@@ -565,6 +622,7 @@ def _view_signature(view_mode: str, snap: _Snapshot, tz: ZoneInfo) -> str:
             update_pending=snap.update_pending,
             view_mode="weekly",
             week_events=snap.events.week,
+            fetch_problems=snap.fetch_problems,
         )
     return _events_signature(
         tz, snap.events.today, snap.events.tomorrow, snap.weather_alerts, snap.header_date,
@@ -572,6 +630,7 @@ def _view_signature(view_mode: str, snap: _Snapshot, tz: ZoneInfo) -> str:
         update_pending=snap.update_pending,
         view_mode="daily",
         upcoming_birthdays=snap.events.upcoming_birthdays,
+        fetch_problems=snap.fetch_problems,
     )
 
 
@@ -603,6 +662,7 @@ def _render_view(
             weather_alerts=snap.weather_alerts,
             update_pending=snap.update_pending,
             day_forecasts=day_forecasts,
+            fetch_problems=snap.fetch_problems,
         )
 
     # Travel times and weather are looked up here, for a frame that's actually
@@ -648,6 +708,7 @@ def _render_view(
         reminders=snap.reminders,
         update_pending=snap.update_pending,
         upcoming_birthdays=snap.events.upcoming_birthdays,
+        fetch_problems=snap.fetch_problems,
     )
 
 
@@ -766,19 +827,35 @@ def run_once(
         latitude=cfg.weather.latitude,
         longitude=cfg.weather.longitude,
     )
+    # Whatever can't be fetched is drawn without, and listed at the bottom of
+    # the screen so it doesn't pass for an empty day (see inkycal.fetchnotice).
+    fetch_problems: List[FetchProblem] = []
+    # The forecast is downloaded on every run, not just for a frame being
+    # drawn, so that its failing and its coming back both change the content
+    # hash. A failure is kept by the resolver, so the lookups at draw time
+    # don't each wait out the timeout again.
+    try:
+        weather_resolver.load()
+    except Exception as e:
+        print(f"Weather forecast download failed; drawing without weather. Error: {e}")
+        fetch_problems.append(FetchProblem(WEATHER, describe_error(e)))
     try:
         weather_alerts = weather_resolver.active_alerts()
     except Exception as e:
         print(f"NWS alert lookup failed; continuing without alerts. Error: {e}")
+        fetch_problems.append(FetchProblem(WEATHER_ALERTS, describe_error(e)))
         weather_alerts = []
 
     # Everything both views show, fetched once. The view on the panel is
     # checked against what's there; the other is kept drawn for the view
     # button (see _keep_frames_current).
     _, day_end = _today_range(now, tz)
+    events = _fetch_view_events(cfg, now, tz, problems=fetch_problems)
+    if fetch_problems:
+        print("Fetch problems shown on screen: " + "; ".join(str(p) for p in fetch_problems))
     snap = _Snapshot(
         now=now,
-        events=_fetch_view_events(cfg, now, tz),
+        events=events,
         reminders=_fetch_reminders_for_day(cfg, day_end, tz),
         weather_alerts=weather_alerts,
         header_date=now.strftime("%A, %B %-d, %Y"),
@@ -786,6 +863,7 @@ def run_once(
         wifi_status=get_wifi_status(),
         ups_status=get_ups_status(),
         update_pending=update_pending,
+        fetch_problems=fetch_problems,
     )
     signatures = {mode: _view_signature(mode, snap, tz) for mode in VIEW_MODES}
     sig = signatures[view_mode]

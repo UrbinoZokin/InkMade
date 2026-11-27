@@ -154,6 +154,17 @@ class WeatherForecastResolver:
                 raise
         return self._forecast_data
 
+    def load(self) -> None:
+        """Download the forecast now rather than at the first lookup.
+
+        Raises whatever the download raised, and every lookup after a failed
+        load raises it again without retrying. run_once calls this on every
+        run so that a failed forecast, and its recovery, show up in the
+        content hash (see inkycal.fetchnotice) instead of waiting for the
+        hourly repaint.
+        """
+        self._forecast()
+
     def _hourly_forecast(self) -> Dict[str, tuple[float, int]]:
         return self._forecast()[0]
 
@@ -178,7 +189,13 @@ class WeatherForecastResolver:
         with urlopen(url, timeout=6) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
 
-        return _parse_hourly(payload.get("hourly", {})), _parse_daily(payload.get("daily", {}))
+        hourly = _parse_hourly(payload.get("hourly", {}))
+        daily = _parse_daily(payload.get("daily", {}))
+        if not hourly and not daily:
+            # An answer with nothing usable in it draws exactly like a failed
+            # download -- no weather anywhere -- so it's reported like one.
+            raise ValueError("Open-Meteo's response had no forecast in it")
+        return hourly, daily
 
     def forecast_for_datetime(self, forecast_time: datetime) -> Optional[WeatherAtTime]:
         if forecast_time.tzinfo is None:

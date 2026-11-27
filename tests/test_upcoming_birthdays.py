@@ -45,7 +45,7 @@ def test_looks_two_weeks_ahead():
 
 def test_one_fetch_covers_the_two_weeks(monkeypatch):
     asked = []
-    monkeypatch.setattr(main, "_fetch_raw_events", lambda cfg, start, end, tz: asked.append((start, end)) or [])
+    monkeypatch.setattr(main, "_fetch_raw_events", lambda cfg, start, end, tz, **_kw: asked.append((start, end)) or [])
 
     _fetch_view_events(None, NOW, TZ)
 

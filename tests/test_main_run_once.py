@@ -50,6 +50,9 @@ class _NoWeather:
     def __init__(self, **_kwargs):
         pass
 
+    def load(self):
+        pass
+
     def active_alerts(self):
         return []
 
