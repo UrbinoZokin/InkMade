@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 from PIL import Image, ImageDraw, ImageFont
 
+from .fetchnotice import FetchProblem, notice_text
 from .models import Event, Reminder
 from .weather import DayForecast, WeatherAlert
 
@@ -282,6 +283,32 @@ def _prepare_weather_alert_lines(
     return lines
 
 
+# The fetch notice wraps onto this many lines at most; anything past them is
+# cut off with an ellipsis. Four sources each failing a different way still
+# fit on two lines of the 1200px-wide panel.
+FETCH_NOTICE_MAX_LINES = 3
+
+
+def _fetch_notice_lines(
+    draw: ImageDraw.ImageDraw,
+    problems: Optional[List[FetchProblem]],
+    font: ImageFont.FreeTypeFont,
+    max_width: float,
+) -> List[str]:
+    """The red "couldn't fetch" notice above the status line, wrapped to fit."""
+    text = notice_text(problems or [])
+    if not text:
+        return []
+    lines = _wrap_text(draw, f"⚠ {text}", font, max_width, max_lines=None)
+    if len(lines) > FETCH_NOTICE_MAX_LINES:
+        lines = lines[:FETCH_NOTICE_MAX_LINES]
+        last = lines[-1]
+        while last and draw.textlength(f"{last} …", font=font) > max_width:
+            last = last.rsplit(" ", 1)[0] if " " in last else ""
+        lines[-1] = f"{last} …".strip()
+    return lines
+
+
 def _upcoming_birthday_day(day: date, today: date) -> str:
     """The weekday ("Fri") within the coming week; after it, when "Fri" could mean two days, the date ("Oct 16")."""
     if (day - today).days < 7:
@@ -428,6 +455,7 @@ def render_daily_schedule(
     reminders: Optional[List[Reminder]] = None,
     update_pending: bool = False,
     upcoming_birthdays: Optional[List[Event]] = None,
+    fetch_problems: Optional[List[FetchProblem]] = None,
 ) -> Image.Image:
     img = Image.new("RGB", (canvas_w, canvas_h), "white")
     d = ImageDraw.Draw(img)
@@ -498,6 +526,13 @@ def render_daily_schedule(
         if ups_right - ups_text_w < min_ups_x:
             ups_on_second_line = True
             updated_block_h += ups_text_h + 8
+
+    # What couldn't be fetched sits just above the status line, so the space
+    # it takes comes out of the schedule only when there's something to say.
+    notice_lines = _fetch_notice_lines(d, fetch_problems, font_small, canvas_w - (2 * padding))
+    notice_line_h = font_small.size + 6
+    notice_block_h = (len(notice_lines) * notice_line_h + 8) if notice_lines else 0
+    updated_block_h += notice_block_h
 
     weather_alert_lines = _prepare_weather_alert_lines(
         d,
@@ -864,6 +899,10 @@ def render_daily_schedule(
             ups_y = updated_y
         d.text((ups_x, ups_y), ups_text, fill="black", font=font_small)
     d.text((padding, updated_y), updated_text, fill="black", font=font_small)
+    notice_y = updated_y - (ups_text_h + 8 if ups_on_second_line else 0) - notice_block_h
+    for line in notice_lines:
+        d.text((padding, notice_y), line, fill="red", font=font_small)
+        notice_y += notice_line_h
     usable_canvas_h = canvas_h - (banner_h if show_sleep_banner else 0)
     _draw_wifi_status(d, canvas_w, usable_canvas_h, padding, wifi_status, font_small)
     if update_pending:
@@ -1044,6 +1083,7 @@ def render_weekly_schedule(
     update_pending: bool = False,
     days: int = 7,
     day_forecasts: Optional[Dict[date, DayForecast]] = None,
+    fetch_problems: Optional[List[FetchProblem]] = None,
 ) -> Image.Image:
     """Weekly overview: the next `days` days, event names only (no times), each with its weather."""
     img = Image.new("RGB", (canvas_w, canvas_h), "white")
@@ -1107,6 +1147,8 @@ def render_weekly_schedule(
     footer_block_h = footer_line_h + 10
     if ups_text:
         footer_block_h += footer_line_h
+    notice_lines = _fetch_notice_lines(d, fetch_problems, font_small, canvas_w - (2 * padding))
+    footer_block_h += len(notice_lines) * footer_line_h
 
     weather_alert_lines = _prepare_weather_alert_lines(
         d, weather_alerts or [], font_small, canvas_w - (2 * padding)
@@ -1200,6 +1242,9 @@ def render_weekly_schedule(
             line_start_y += weather_alert_line_h
 
     footer_y = bottom_y - footer_block_h + 10
+    for line in notice_lines:
+        d.text((padding, footer_y), line, fill="red", font=font_small)
+        footer_y += footer_line_h
     if ups_text:
         d.text((padding, footer_y), ups_text, fill="black", font=font_small)
         footer_y += footer_line_h

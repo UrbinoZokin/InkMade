@@ -46,6 +46,9 @@ class _NoWeather:
     def __init__(self, **_kwargs):
         pass
 
+    def load(self):
+        pass
+
     def active_alerts(self):
         return []
 
@@ -98,7 +101,7 @@ def test_one_calendar_fetch_serves_both_views(paths, panel, monkeypatch):
     # the week is inside the two weeks the upcoming-birthdays line looks at.
     fetches = []
     monkeypatch.setattr(
-        main, "_fetch_raw_events", lambda _cfg, start, end, _tz: fetches.append((start, end)) or []
+        main, "_fetch_raw_events", lambda _cfg, start, end, _tz, **_kw: fetches.append((start, end)) or []
     )
     config_path, state_path = paths()
 
@@ -218,7 +221,9 @@ def test_one_weather_resolver_serves_the_whole_run(paths, calendar, panel, monke
 
 def test_weather_and_travel_are_looked_up_only_for_a_frame_being_drawn(paths, calendar, panel, monkeypatch):
     # Neither is in the content hash, so a run that finds nothing changed has
-    # no use for them -- and that's most runs.
+    # no use for them -- and that's most runs. (The forecast is still
+    # downloaded every run, so a failed download can show; that's load(), not
+    # a lookup.)
     lookups = []
 
     class CountingWeather(_NoWeather):

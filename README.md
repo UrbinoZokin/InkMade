@@ -299,6 +299,33 @@ sudo systemctl start inkycal-boot.service
 If that paints and the quarter-hour runs don't, the problem is the timer or the
 skip logic, not the calendars or the panel.
 
+### When weather or events are missing
+
+A fetch that fails doesn't stop the run: the screen is drawn without what it
+couldn't get. So that an outage doesn't pass for an empty day, a red line just
+above “Updated” says what's missing and why, e.g.
+*⚠ Weather, Google: no internet · iCloud: sign-in rejected*. It covers the
+forecast, NWS alerts, and the Google and iCloud calendars.
+
+| Reason | What it means |
+|---|---|
+| `no internet` | The Pi couldn't look the server up or has no route out. Check its Wi-Fi first. |
+| `timed out` / `connection failed` | The Pi is online but the service didn't answer. Usually passes on its own. |
+| `server error 5xx` / `rate limited` | The service answered with an error: it's down or turning requests away. Nothing to fix on the Pi. |
+| `certificate error` | Most often the Pi's clock being wrong, which makes every certificate look invalid. Check `timedatectl`. |
+| `sign-in expired` / `needs sign-in` / `sign-in rejected` | Google needs a fresh token from `scripts/google_auth.py`, or iCloud's app password was revoked. |
+| `not set up` | The calendar is enabled in `config.yaml` but its credentials aren't in `.env`. |
+
+`Google (1 calendar)` means the others were read and that one wasn't, for
+example a calendar id that no longer exists. The full error is in the journal:
+
+```bash
+journalctl -u inkycal.service --since today | grep -iE "failed|Fetch problems"
+```
+
+The forecast is downloaded on every quarter-hour run, so the line clears (and
+the weather comes back) on the first run after the service recovers.
+
 ## 🔄 Over-the-air updates (no SSH)
 
 Once installed, the Pi keeps itself up to date. You can hand the device to

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from zoneinfo import ZoneInfo
 import os
 
@@ -122,7 +122,13 @@ def fetch_google_events(
     day_end: datetime,
     tz: ZoneInfo,
     token_path: str,
+    failures: Optional[List[Tuple[str, Exception]]] = None,
 ) -> List[Event]:
+    """Events from each of `calendar_ids`.
+
+    A calendar that can't be read is skipped rather than failing the rest;
+    pass `failures` to be told which, as (calendar id, error) pairs.
+    """
     creds = _load_creds(token_path)
     service = build("calendar", "v3", credentials=creds, cache_discovery=False)
 
@@ -137,6 +143,8 @@ def fetch_google_events(
             # One unreadable calendar (a stale id, or a birthday calendar the
             # account doesn't have) must not cost us every other calendar.
             print(f"Google Calendar '{cal_id}' fetch failed; skipping it. Error: {e}")
+            if failures is not None:
+                failures.append((cal_id, e))
             continue
 
         for item in items:
