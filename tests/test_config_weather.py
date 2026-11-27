@@ -29,3 +29,31 @@ def test_weather_config_uses_custom_coordinates(tmp_path):
 
     assert cfg.weather.latitude == 47.6062
     assert cfg.weather.longitude == -122.3321
+
+
+def test_event_locations_are_on_with_a_ten_mile_cutoff_by_default(tmp_path):
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("timezone: 'America/Phoenix'\n", encoding="utf-8")
+
+    cfg = load_config(str(cfg_path))
+
+    assert cfg.weather.event_locations is True
+    assert cfg.weather.event_location_min_miles == 10.0
+
+
+def test_event_locations_can_be_turned_off_or_the_cutoff_changed(tmp_path):
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        """
+        timezone: 'America/Phoenix'
+        weather:
+          event_locations: false
+          event_location_min_miles: 25
+        """,
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    assert cfg.weather.event_locations is False
+    assert cfg.weather.event_location_min_miles == 25.0

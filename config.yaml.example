@@ -49,6 +49,13 @@ travel:
 weather:
   latitude: 33.4353   # Goodyear, AZ (default)
   longitude: -112.3582
+  # An event whose address is more than event_location_min_miles from here
+  # shows the weather there instead, with an asterisk (41°F*). Addresses are
+  # looked up once with OpenStreetMap's geocoder and kept in
+  # /var/lib/inkycal/geocode_cache.json; set event_locations: false to keep
+  # them on the Pi and show home weather for every event.
+  event_locations: true
+  event_location_min_miles: 10
 
 # Over-the-air updates. When enabled, the display checks GitHub on every refresh
 # shows a small black hexagon with an upward arrow in the bottom status bar

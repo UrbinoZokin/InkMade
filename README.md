@@ -29,7 +29,9 @@ PYTHONPATH=src python -m inkycal.main --config config.yaml --long-events-weather
 - The setup agent only listens in setup mode, behind a one-time code shown on the screen  
 - Presses are acknowledged on the display before the slow work starts  
 - Switching views is a single refresh: the other view is kept drawn ahead of time  
-- One calendar fetch and one forecast download per update, however many events  
+- Events with an address out of town show the weather there, marked with an asterisk  
+- One calendar fetch and one forecast download per update, however many events
+  (plus one for any events out of town, when the daily view is redrawn)  
 - Button presses echo live to any SSH session (and the local console)  
 - Everything starts on its own at power-on, with a forced display refresh  
 - Fully automated install with virtualenv (no externally-managed errors)  
@@ -325,6 +327,35 @@ journalctl -u inkycal.service --since today | grep -iE "failed|Fetch problems"
 
 The forecast is downloaded on every quarter-hour run, so the line clears (and
 the weather comes back) on the first run after the service recovers.
+
+### Weather where the event is
+
+An event whose address (the location field in Google or iCloud, not its
+description) is more than 10 miles from home shows the weather there instead
+of at home, marked with an asterisk: `41°F*` next to a hike in Flagstaff, or
+`41°F* → 45°F*` for a long one. Closer than that, the forecast is home's
+anyway. An address that can't be placed (“Mom's”, “Room 4B”, a Zoom link)
+keeps home's weather, unmarked, and so does every event if the lookup or its
+forecast fails. The weekly view's highs and lows, and the weather alerts, are
+always home's.
+
+Addresses are looked up with OpenStreetMap's free geocoder, preferring places
+near home, so “Starbucks” is the one down the road. Each answer is kept in
+`/var/lib/inkycal/geocode_cache.json`, so an address is only sent once (one
+that couldn't be placed is tried again after a month). Changing the home
+coordinates starts that file afresh; deleting it does the same.
+
+A temperature with an asterisk that looks wrong usually means the address
+matched the wrong place. Making the address more specific (adding the town)
+fixes it.
+
+```yaml
+weather:
+  latitude: 33.4353
+  longitude: -112.3582
+  event_locations: true          # false: home weather for every event, no lookups
+  event_location_min_miles: 10
+```
 
 ## 🔄 Over-the-air updates (no SSH)
 

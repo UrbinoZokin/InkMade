@@ -125,6 +125,45 @@ def _parse_daily(daily: dict) -> Dict[date, DayForecast]:
     return by_day
 
 
+def _download(
+    timezone: str,
+    places: Sequence[Tuple[float, float]],
+    forecast_days: int,
+    include_daily: bool,
+) -> List[dict]:
+    """Open-Meteo's forecast for each of `places`, in the same order, from one request."""
+    params = {
+        "latitude": ",".join(str(lat) for lat, _ in places),
+        "longitude": ",".join(str(lon) for _, lon in places),
+        "hourly": "temperature_2m,weather_code",
+        "temperature_unit": "fahrenheit",
+        "timezone": timezone,
+        "forecast_days": forecast_days,
+    }
+    if include_daily:
+        params["daily"] = "temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max"
+    url = f"https://api.open-meteo.com/v1/forecast?{urlencode(params)}"
+
+    with urlopen(url, timeout=6) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+
+    # One place is answered with an object, several with a list of them.
+    payloads = payload if isinstance(payload, list) else [payload]
+    if len(payloads) != len(places) or not all(isinstance(p, dict) for p in payloads):
+        raise ValueError(f"Open-Meteo answered for {len(payloads)} places, not {len(places)}")
+    return payloads
+
+
+def _parse_forecast(payload: dict) -> Tuple[Dict[str, tuple[float, int]], Dict[date, DayForecast]]:
+    hourly = _parse_hourly(payload.get("hourly", {}))
+    daily = _parse_daily(payload.get("daily", {}))
+    if not hourly and not daily:
+        # An answer with nothing usable in it draws exactly like a failed
+        # download -- no weather anywhere -- so it's reported like one.
+        raise ValueError("Open-Meteo's response had no forecast in it")
+    return hourly, daily
+
+
 class WeatherForecastResolver:
     def __init__(self, timezone: str, latitude: float, longitude: float):
         self.timezone = timezone
@@ -173,29 +212,8 @@ class WeatherForecastResolver:
         return self._forecast()[1]
 
     def _fetch_forecast(self) -> Tuple[Dict[str, tuple[float, int]], Dict[date, DayForecast]]:
-        params = urlencode(
-            {
-                "latitude": self.latitude,
-                "longitude": self.longitude,
-                "hourly": "temperature_2m,weather_code",
-                "daily": "temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max",
-                "temperature_unit": "fahrenheit",
-                "timezone": self.timezone,
-                "forecast_days": FORECAST_DAYS,
-            }
-        )
-        url = f"https://api.open-meteo.com/v1/forecast?{params}"
-
-        with urlopen(url, timeout=6) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-
-        hourly = _parse_hourly(payload.get("hourly", {}))
-        daily = _parse_daily(payload.get("daily", {}))
-        if not hourly and not daily:
-            # An answer with nothing usable in it draws exactly like a failed
-            # download -- no weather anywhere -- so it's reported like one.
-            raise ValueError("Open-Meteo's response had no forecast in it")
-        return hourly, daily
+        payload = _download(self.timezone, [(self.latitude, self.longitude)], FORECAST_DAYS, include_daily=True)[0]
+        return _parse_forecast(payload)
 
     def forecast_for_datetime(self, forecast_time: datetime) -> Optional[WeatherAtTime]:
         if forecast_time.tzinfo is None:
@@ -241,3 +259,31 @@ class WeatherForecastResolver:
             if len(alerts) >= limit:
                 break
         return alerts
+
+
+# The days a forecast for an event away from home covers: today and tomorrow,
+# the only days the daily view puts weather next to events.
+PLACE_FORECAST_DAYS = 2
+
+
+def forecasts_for_places(timezone: str, places: Sequence[Tuple[float, float]]) -> List[WeatherForecastResolver]:
+    """A resolver for each of `places`, in order, all filled from one download.
+
+    For events away from home (see main._event_place_forecasts): Open-Meteo
+    answers for several places in one request, so a day of errands in two
+    other towns still costs one download. Only the hourly forecast is asked
+    for; the daily highs and lows are the weekly view's, and stay home's.
+
+    Raises whatever the download raised. A place whose own answer has no
+    forecast in it raises that on its own lookups, leaving the others be.
+    """
+    payloads = _download(timezone, places, PLACE_FORECAST_DAYS, include_daily=False)
+    resolvers = []
+    for (lat, lon), payload in zip(places, payloads):
+        resolver = WeatherForecastResolver(timezone=timezone, latitude=lat, longitude=lon)
+        try:
+            resolver._forecast_data = _parse_forecast(payload)
+        except ValueError as e:
+            resolver._fetch_error = e
+        resolvers.append(resolver)
+    return resolvers
